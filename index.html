@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TaskBoard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <div class="header-title">
+            <span>Your Table</span>
+        </div>
+        <div class="header-controls">
+            <input 
+                type="text" 
+                class="search-box" 
+                id="searchInput" 
+                placeholder="Filtrar tareas..."
+            >
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-secondary btn-icon" id="themeToggle" title="Cambiar tema">
+                🌙
+            </button>
+            <button class="btn btn-primary" id="newTaskBtn">
+                ➕ Nueva Tarea
+            </button>
+        </div>
+    </header>
+
+    <main class="board">
+        <div class="columns-container" id="boardColumns"></div>
+    </main>
+
+    <!-- Modal Nueva Tarea -->
+    <dialog id="taskModal" class="modal">
+        <div class="modal-content">
+            <h2 class="modal-header">Crear Tarea</h2>
+            <form id="taskForm">
+                <div class="form-group">
+                    <label class="form-label">Título *</label>
+                    <input type="text" class="form-input" id="taskTitle" placeholder="¿Qué hay que hacer?" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Descripción</label>
+                    <textarea class="form-textarea" id="taskDescription" placeholder="Detalles..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Prioridad</label>
+                    <select class="form-select" id="taskPriority">
+                        <option value="low">Baja</option>
+                        <option value="medium" selected>Media</option>
+                        <option value="high">Alta</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Fecha límite</label>
+                    <input type="date" class="form-input" id="taskDueDate">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Especificaciones / Valores a medida</label>
+                    <div id="taskSpecsContainer" class="specs-container"></div>
+                    <button type="button" class="btn btn-secondary btn-small" onclick="addSpecField('taskSpecsContainer')">➕ Añadir campo</button>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeTaskModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </dialog>
+
+    <!-- Modal Editar Tarea -->
+    <dialog id="editModal" class="modal">
+        <div class="modal-content">
+            <h2 class="modal-header">Editar Tarea</h2>
+            <form id="editForm">
+                <div class="form-group">
+                    <label class="form-label">Título *</label>
+                    <input type="text" class="form-input" id="editTitle" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Descripción</label>
+                    <textarea class="form-textarea" id="editDescription"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Prioridad</label>
+                    <select class="form-select" id="editPriority">
+                        <option value="low">Baja</option>
+                        <option value="medium">Media</option>
+                        <option value="high">Alta</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Fecha límite</label>
+                    <input type="date" class="form-input" id="editDueDate">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Especificaciones / Valores a medida</label>
+                    <div id="editSpecsContainer" class="specs-container"></div>
+                    <button type="button" class="btn btn-secondary btn-small" onclick="addSpecField('editSpecsContainer')">➕ Añadir campo</button>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeEditModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Actualizar</button>
+                </div>
+            </form>
+        </div>
+    </dialog>
+
+    <script src="app.js"></script>
+</body>
+</html>
