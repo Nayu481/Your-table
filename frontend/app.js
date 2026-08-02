@@ -156,7 +156,8 @@ function setupAuthListeners() {
             }
 
             try {
-                const endpoint = isRegistering ? '/register' : '/login';
+                // CORRECCIÓN: Se agregó el prefijo /api requerido por el backend
+                const endpoint = isRegistering ? '/api/register' : '/api/login';
                 const body = JSON.stringify({ username, password });
 
                 const res = await fetch(`${API_URL}${endpoint}`, {
@@ -179,10 +180,9 @@ function setupAuthListeners() {
                     closeAuthModal();
                     
                     if (isRegistering) {
-                        alert('¡Cuenta creada! Inicia sesión.');
+                        alert('¡Cuenta creada con éxito!');
                         isRegistering = false;
                         form.reset();
-                        openAuthModal();
                     } else {
                         alert('¡Sesión iniciada!');
                     }
