@@ -1,1166 +1,349 @@
-const API_URL = 'https://your-table.onrender.com';
-const STORAGE_KEY_BOARDS = 'kanban_boards_v2';
-const STORAGE_KEY_CURRENT = 'kanban_current_board_v2';
+from fastapi import FastAPI, Depends, HTTPException, Header
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+import bcrypt
+from datetime import datetime
 
-let currentUser = localStorage.getItem('kanban_user_id');
-let currentUsername = localStorage.getItem('kanban_username');
-let isRegistering = false;
-let currentBoardId = parseInt(localStorage.getItem(STORAGE_KEY_CURRENT)) || null;
-let boards = [];
-let currentBoardData = {
-    id: null,
-    title: 'Mi Tablero',
-    tasks: {},
-    nextId: 1,
-    columnList: [],
-    columns: {},
-    owner_id: currentUser,
-    shared_users: []
-};
+from models import DBUser, DBBoard, DBTask, DBInvitation, Base
+from schemas import UserCreate, UserResponse, BoardCreate, BoardResponse, TaskCreate, TaskResponse, InvitationResponse
+from database import engine, get_db
 
-let currentEditingTaskId = null;
-let searchQuery = '';
-let draggedColumnId = null;
-let pendingShareUsers = [];
+Base.metadata.create_all(bind=engine)
 
-const DEFAULT_COLUMNS = [
-    { id: 'todo', title: 'Por hacer', color: '#bfdbfe' },
-    { id: 'in-progress', title: 'En progreso', color: '#fef08a' },
-    { id: 'review', title: 'En revisión', color: '#fbcfe8' },
-    { id: 'completed', title: 'Completado', color: '#bbf7d0' }
-];
+app = FastAPI(title="Your Table API", version="2.0")
 
-document.addEventListener('DOMContentLoaded', () => {
-    applyTheme();
-    initializeApp();
-    setupAuthListeners();
-    attachMainEventListeners();
-});
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-function initializeApp() {
-    updateUserDisplay();
-    loadLocalBoards();
-    if (!currentBoardId) {
-        createDefaultBoard();
-    } else {
-        loadBoard(currentBoardId);
-    }
+def hash_password(password: str) -> str:
+    """Hashea una contraseña usando bcrypt"""
+    if len(password) > 72:
+        raise ValueError("La contraseña no puede exceder 72 caracteres")
     
-    if (currentUser) {
-        loadInvitations();
-    }
-}
+    salt = bcrypt.gensalt(rounds=12)
+    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+    return hashed.decode('utf-8')
 
-function loadLocalBoards() {
-    const stored = localStorage.getItem(STORAGE_KEY_BOARDS);
-    if (stored) {
-        try {
-            boards = JSON.parse(stored);
-        } catch (e) {
-            boards = [];
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verifica una contraseña contra su hash"""
+    try:
+        if len(plain_password) > 72:
+            return False
+        return bcrypt.checkpw(
+            plain_password.encode('utf-8'),
+            hashed_password.encode('utf-8')
+        )
+    except Exception as e:
+        print(f"Error verificando contraseña: {e}")
+        return False
+
+# ========== AUTENTICACIÓN ==========
+
+@app.post("/register", response_model=UserResponse)
+def register(user: UserCreate, db: Session = Depends(get_db)):
+    """Registra un nuevo usuario"""
+    try:
+        existing_user = db.query(DBUser).filter(DBUser.username == user.username).first()
+        if existing_user:
+            raise HTTPException(status_code=400, detail="El usuario ya existe")
+        
+        if len(user.password) < 4:
+            raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 4 caracteres")
+        
+        if len(user.password) > 72:
+            raise HTTPException(status_code=400, detail="La contraseña no puede exceder 72 caracteres")
+        
+        hashed_password = hash_password(user.password)
+        
+        new_user = DBUser(
+            username=user.username,
+            hashed_password=hashed_password
+        )
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        
+        return UserResponse(id=new_user.id, username=new_user.username)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"Error en registro: {e}")
+        raise HTTPException(status_code=500, detail="Error al registrar usuario")
+
+@app.post("/login", response_model=UserResponse)
+def login(user: UserCreate, db: Session = Depends(get_db)):
+    """Inicia sesión con username y contraseña"""
+    try:
+        db_user = db.query(DBUser).filter(DBUser.username == user.username).first()
+        
+        if not db_user:
+            raise HTTPException(status_code=401, detail="Credenciales inválidas")
+        
+        if not verify_password(user.password, db_user.hashed_password):
+            raise HTTPException(status_code=401, detail="Credenciales inválidas")
+        
+        return UserResponse(id=db_user.id, username=db_user.username)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error en login: {e}")
+        raise HTTPException(status_code=500, detail="Error al iniciar sesión")
+
+@app.get("/api/health")
+def health_check():
+    """Endpoint de salud"""
+    return {"status": "ok", "message": "Your Table API funcionando"}
+
+# ========== TABLEROS ==========
+
+@app.post("/api/boards", response_model=BoardResponse)
+def create_board(board: BoardCreate, x_user_id: int = Header(...), db: Session = Depends(get_db)):
+    """Crea un nuevo tablero"""
+    try:
+        db_user = db.query(DBUser).filter(DBUser.id == x_user_id).first()
+        if not db_user:
+            raise HTTPException(status_code=401, detail="Usuario no autenticado")
+        
+        new_board = DBBoard(
+            title=board.title,
+            description=board.description,
+            owner_id=x_user_id
+        )
+        db.add(new_board)
+        db.commit()
+        db.refresh(new_board)
+        return BoardResponse.from_orm(new_board)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"Error creando tablero: {e}")
+        raise HTTPException(status_code=500, detail="Error al crear tablero")
+
+@app.get("/api/boards")
+def get_boards(x_user_id: int = Header(...), db: Session = Depends(get_db)):
+    """Obtiene tableros del usuario (propios y compartidos)"""
+    try:
+        db_user = db.query(DBUser).filter(DBUser.id == x_user_id).first()
+        if not db_user:
+            raise HTTPException(status_code=401, detail="Usuario no autenticado")
+        
+        owned = db.query(DBBoard).filter(DBBoard.owner_id == x_user_id).all()
+        shared = db.query(DBBoard).filter(DBBoard.shared_users.any(DBUser.id == x_user_id)).all()
+        
+        return {
+            "owned": [BoardResponse.from_orm(b).dict() for b in owned],
+            "shared": [BoardResponse.from_orm(b).dict() for b in shared]
         }
-    }
-}
-
-function saveLocalBoards() {
-    localStorage.setItem(STORAGE_KEY_BOARDS, JSON.stringify(boards));
-}
-
-function createDefaultBoard() {
-    const board = {
-        id: Date.now(),
-        title: 'Mi Primer Tablero',
-        description: 'Tablero por defecto',
-        tasks: {},
-        nextId: 1,
-        columnList: DEFAULT_COLUMNS.map(c => ({ ...c })),
-        columns: {},
-        owner_id: currentUser,
-        shared_users: [],
-        created_at: new Date().toISOString()
-    };
-    DEFAULT_COLUMNS.forEach(col => {
-        board.columns[col.id] = [];
-    });
-    boards.push(board);
-    currentBoardId = board.id;
-    currentBoardData = JSON.parse(JSON.stringify(board));
-    localStorage.setItem(STORAGE_KEY_CURRENT, currentBoardId);
-    saveLocalBoards();
-    renderBoard();
-}
-
-function loadBoard(boardId) {
-    const board = boards.find(b => b.id === boardId);
-    if (!board) {
-        createDefaultBoard();
-        return;
-    }
-    currentBoardId = boardId;
-    currentBoardData = JSON.parse(JSON.stringify(board));
-    localStorage.setItem(STORAGE_KEY_CURRENT, currentBoardId);
-    const boardNameEl = document.getElementById('current-board-name');
-    if (boardNameEl) {
-        boardNameEl.textContent = `/ ${currentBoardData.title}`;
-    }
-    renderBoard();
-}
-
-function saveCurrentBoard() {
-    const index = boards.findIndex(b => b.id === currentBoardId);
-    if (index !== -1) {
-        boards[index] = JSON.parse(JSON.stringify(currentBoardData));
-        saveLocalBoards();
-    }
-}
-
-function setupAuthListeners() {
-    const form = document.getElementById('auth-form');
-    const toggleBtn = document.getElementById('auth-toggle-btn');
     
-    if (toggleBtn) {
-        toggleBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            isRegistering = !isRegistering;
-            
-            const authTitle = document.getElementById('authTitle');
-            const authSubmitBtn = document.getElementById('auth-submit-btn');
-            const authToggleText = document.getElementById('auth-toggle-text');
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error obteniendo tableros: {e}")
+        raise HTTPException(status_code=500, detail="Error al obtener tableros")
 
-            if (isRegistering) {
-                if (authTitle) authTitle.innerText = 'Registrarse';
-                if (authSubmitBtn) authSubmitBtn.innerText = 'Registrarse';
-                if (authToggleText) authToggleText.innerText = '¿Ya tienes cuenta?';
-                toggleBtn.innerText = 'Inicia sesión';
-            } else {
-                if (authTitle) authTitle.innerText = 'Iniciar Sesión';
-                if (authSubmitBtn) authSubmitBtn.innerText = 'Entrar';
-                if (authToggleText) authToggleText.innerText = '¿No tienes cuenta?';
-                toggleBtn.innerText = 'Regístrate';
-            }
-        });
-    }
-
-    if (form) {
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const usernameInput = document.getElementById('auth-username');
-            const passwordInput = document.getElementById('auth-password');
-            const username = usernameInput ? usernameInput.value.trim() : '';
-            const password = passwordInput ? passwordInput.value : '';
-
-            if (!username || !password) {
-                alert('Por favor completa todos los campos');
-                return;
-            }
-
-            try {
-                const endpoint = isRegistering ? '/register' : '/login';
-                const body = JSON.stringify({ username, password });
-
-                const res = await fetch(`${API_URL}${endpoint}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: body
-                });
-
-                const text = await res.text();
-                const data = text ? JSON.parse(text) : {};
-                
-                if (res.ok) {
-                    localStorage.setItem('kanban_user_id', data.id);
-                    localStorage.setItem('kanban_username', data.username);
-                    
-                    currentUser = data.id;
-                    currentUsername = data.username;
-                    
-                    updateUserDisplay();
-                    closeAuthModal();
-                    
-                    if (isRegistering) {
-                        alert('¡Cuenta creada! Inicia sesión.');
-                        isRegistering = false;
-                        form.reset();
-                        openAuthModal();
-                    } else {
-                        alert('¡Sesión iniciada!');
-                    }
-                } else {
-                    alert(data.detail || 'Error en autenticación');
-                }
-            } catch (err) {
-                console.error(err);
-                alert('Error de conexión con servidor');
-            }
-        });
-    }
-}
-
-function openAuthModal() {
-    const form = document.getElementById('auth-form');
-    if (form) form.reset();
-    isRegistering = false;
-    const authTitle = document.getElementById('authTitle');
-    const authSubmitBtn = document.getElementById('auth-submit-btn');
-    const authToggleText = document.getElementById('auth-toggle-text');
-    const authToggleBtn = document.getElementById('auth-toggle-btn');
-    const authModal = document.getElementById('authModal');
-
-    if (authTitle) authTitle.innerText = 'Iniciar Sesión';
-    if (authSubmitBtn) authSubmitBtn.innerText = 'Entrar';
-    if (authToggleText) authToggleText.innerText = '¿No tienes cuenta?';
-    if (authToggleBtn) authToggleBtn.innerText = 'Regístrate';
-    if (authModal) authModal.showModal();
-}
-
-function closeAuthModal() {
-    const modal = document.getElementById('authModal');
-    if (modal) modal.close();
-}
-
-function updateUserDisplay() {
-    const userDisplay = document.getElementById('logged-user-display');
-    const authBtn = document.getElementById('authBtn');
-    const logoutBtn = document.getElementById('logoutBtn');
-
-    if (currentUser) {
-        if (userDisplay) userDisplay.innerText = `👤 ${currentUsername}`;
-        if (authBtn) authBtn.style.display = 'none';
-        if (logoutBtn) logoutBtn.style.display = 'inline-flex';
-    } else {
-        if (userDisplay) userDisplay.innerText = 'No conectado';
-        if (authBtn) authBtn.style.display = 'inline-flex';
-        if (logoutBtn) logoutBtn.style.display = 'none';
-    }
-}
-
-function logout() {
-    if (confirm('¿Cerrar sesión?')) {
-        localStorage.removeItem('kanban_user_id');
-        localStorage.removeItem('kanban_username');
-        currentUser = null;
-        currentUsername = null;
-        updateUserDisplay();
-        alert('Sesión cerrada');
-    }
-}
-
-function openBoardSelector() {
-    renderBoardList();
-    loadInvitations();
-    const modal = document.getElementById('boardSelectorModal');
-    if (modal) modal.showModal();
-}
-
-function closeBoardSelector() {
-    const modal = document.getElementById('boardSelectorModal');
-    if (modal) modal.close();
-}
-
-function openInvitationsModal() {
-    const modal = document.getElementById('invitationsModal');
-    if (modal) modal.showModal();
-}
-
-function closeInvitationsModal() {
-    const modal = document.getElementById('invitationsModal');
-    if (modal) modal.close();
-}
-
-function loadInvitations() {
-    const invitationsBtn = document.getElementById('invitationsBtn');
-    if (!currentUser) {
-        if (invitationsBtn) invitationsBtn.style.display = 'none';
-        return;
-    }
-
-    fetch(`${API_URL}/invitations`, {
-        method: 'GET',
-        headers: { 'X-User-Id': currentUser }
-    })
-    .then(res => res.json())
-    .then(data => {
-        const count = data.invitations ? data.invitations.length : 0;
-        const countEl = document.getElementById('invitationsCount');
-        if (countEl) countEl.textContent = count;
+@app.put("/api/boards/{board_id}")
+def update_board(board_id: int, board: BoardCreate, x_user_id: int = Header(...), db: Session = Depends(get_db)):
+    """Actualiza un tablero"""
+    try:
+        db_board = db.query(DBBoard).filter(
+            DBBoard.id == board_id,
+            DBBoard.owner_id == x_user_id
+        ).first()
         
-        if (count > 0) {
-            if (invitationsBtn) invitationsBtn.style.display = 'inline-flex';
-            renderInvitations(data.invitations);
-        } else {
-            if (invitationsBtn) invitationsBtn.style.display = 'none';
-        }
-    })
-    .catch(err => console.error('Error cargando invitaciones:', err));
-}
-
-function renderInvitations(invitations) {
-    const container = document.getElementById('invitationsList');
-    if (!container) return;
-    
-    if (!invitations || invitations.length === 0) {
-        container.innerHTML = '<div class="empty-invitations">No tienes invitaciones pendientes</div>';
-        return;
-    }
-
-    container.innerHTML = '';
-    invitations.forEach(inv => {
-        const card = document.createElement('div');
-        card.className = 'invitation-card';
-        card.innerHTML = `
-            <div class="invitation-info">
-                <div class="invitation-title">${escapeHtml(inv.board_title)}</div>
-                <div class="invitation-owner">De: ${escapeHtml(inv.owner_username)}</div>
-            </div>
-            <div class="invitation-actions">
-                <button class="btn btn-primary btn-small" onclick="acceptInvitation(${inv.id})">✅ Aceptar</button>
-                <button class="btn btn-danger btn-small" onclick="rejectInvitation(${inv.id})">❌ Rechazar</button>
-            </div>
-        `;
-        container.appendChild(card);
-    });
-}
-
-function acceptInvitation(invitationId) {
-    fetch(`${API_URL}/invitations/${invitationId}/accept`, {
-        method: 'POST',
-        headers: { 'X-User-Id': currentUser }
-    })
-    .then(res => res.json())
-    .then(data => {
-        alert('Tablero aceptado');
-        loadInvitations();
-        renderInvitations([]);
-    })
-    .catch(err => {
-        console.error('Error:', err);
-        alert('Error al aceptar invitación');
-    });
-}
-
-function rejectInvitation(invitationId) {
-    if (!confirm('¿Rechazar esta invitación?')) return;
-    
-    fetch(`${API_URL}/invitations/${invitationId}/reject`, {
-        method: 'POST',
-        headers: { 'X-User-Id': currentUser }
-    })
-    .then(res => res.json())
-    .then(data => {
-        alert('Invitación rechazada');
-        loadInvitations();
-        renderInvitations([]);
-    })
-    .catch(err => {
-        console.error('Error:', err);
-        alert('Error al rechazar invitación');
-    });
-}
-
-function renderBoardList() {
-    const container = document.getElementById('boardList');
-    if (!container) return;
-    container.innerHTML = '';
-
-    boards.forEach(board => {
-        const isOwner = board.owner_id === currentUser;
-        const isShared = board.shared_users && board.shared_users.length > 0;
-        const badge = isOwner ? '<span class="board-card-badge">Propietario</span>' : 
-                     isShared ? '<span class="board-card-badge" style="background-color: #8b5cf6;">Compartido</span>' : 
-                     '<span class="board-card-badge" style="background-color: #64748b;">Local</span>';
-
-        const card = document.createElement('div');
-        card.className = 'board-card';
-        card.innerHTML = `
-            <div class="board-card-header">
-                <span class="board-card-title">${escapeHtml(board.title)}</span>
-                ${badge}
-            </div>
-            ${board.description ? `<div class="board-card-description">${escapeHtml(board.description)}</div>` : ''}
-            <div class="board-card-meta">
-                <span>${board.columnList.length} columnas</span>
-                <span>${Object.keys(board.tasks).length} tareas</span>
-            </div>
-            <div class="board-card-actions" onclick="event.stopPropagation();">
-                ${isOwner ? `<button class="btn btn-secondary btn-small" onclick="openBoardSettings(${board.id})">⚙️</button>` : ''}
-                ${isOwner ? `<button class="btn btn-danger btn-small" onclick="deleteBoard(${board.id})">🗑️</button>` : ''}
-            </div>
-        `;
+        if not db_board:
+            raise HTTPException(status_code=404, detail="Tablero no encontrado")
         
-        card.onclick = () => {
-            loadBoard(board.id);
-            closeBoardSelector();
-        };
+        db_board.title = board.title
+        db_board.description = board.description
+        db.commit()
+        db.refresh(db_board)
         
-        container.appendChild(card);
-    });
-}
-
-function openBoardSettings(boardId) {
-    const board = boards.find(b => b.id === boardId);
-    if (!board || board.owner_id !== currentUser) return;
-
-    const titleInput = document.getElementById('boardSettingsTitle');
-    const descInput = document.getElementById('boardSettingsDescription');
-    const form = document.getElementById('boardSettingsForm');
-    const modal = document.getElementById('boardSettingsModal');
-
-    if (titleInput) titleInput.value = board.title;
-    if (descInput) descInput.value = board.description || '';
-    if (form) form.dataset.boardId = boardId;
+        return BoardResponse.from_orm(db_board)
     
-    renderCurrentSharedUsers(boardId);
-    if (modal) modal.showModal();
-}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"Error actualizando tablero: {e}")
+        raise HTTPException(status_code=500, detail="Error al actualizar tablero")
 
-function closeBoardSettings() {
-    const modal = document.getElementById('boardSettingsModal');
-    if (modal) modal.close();
-}
-
-function renderCurrentSharedUsers(boardId) {
-    const board = boards.find(b => b.id === boardId);
-    const container = document.getElementById('currentSharedUsers');
-    if (!container) return;
-    container.innerHTML = '';
-
-    if (!board || !board.shared_users || board.shared_users.length === 0) {
-        container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">Sin usuarios compartidos</p>';
-        return;
-    }
-
-    board.shared_users.forEach(username => {
-        const item = document.createElement('div');
-        item.className = 'shared-user-item';
-        item.innerHTML = `
-            <span>${escapeHtml(username)}</span>
-            <button type="button" class="shared-user-remove" onclick="removeSharedUser(${boardId}, '${escapeHtml(username)}')">✕</button>
-        `;
-        container.appendChild(item);
-    });
-}
-
-function addBoardShareUser(boardId) {
-    if (!currentUser) {
-        alert('Debes iniciar sesión');
-        return;
-    }
+@app.post("/api/boards/{board_id}/share")
+def share_board(board_id: int, username: str, x_user_id: int = Header(...), db: Session = Depends(get_db)):
+    """Comparte un tablero con otro usuario (envía invitación)"""
+    try:
+        db_board = db.query(DBBoard).filter(
+            DBBoard.id == board_id,
+            DBBoard.owner_id == x_user_id
+        ).first()
+        
+        if not db_board:
+            raise HTTPException(status_code=404, detail="Tablero no encontrado")
+        
+        target_user = db.query(DBUser).filter(DBUser.username == username).first()
+        if not target_user:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        
+        if target_user.id == x_user_id:
+            raise HTTPException(status_code=400, detail="No puedes compartir contigo mismo")
+        
+        # Verificar si ya existe una invitación pendiente
+        existing_invite = db.query(DBInvitation).filter(
+            DBInvitation.board_id == board_id,
+            DBInvitation.user_id == target_user.id,
+            DBInvitation.status == "pending"
+        ).first()
+        
+        if existing_invite:
+            raise HTTPException(status_code=400, detail="Ya hay una invitación pendiente")
+        
+        # Verificar si ya está compartido
+        if target_user in db_board.shared_users:
+            raise HTTPException(status_code=400, detail="Ya tiene acceso a este tablero")
+        
+        # Crear invitación
+        invitation = DBInvitation(board_id=board_id, user_id=target_user.id)
+        db.add(invitation)
+        db.commit()
+        
+        return {"ok": True, "message": f"Invitación enviada a {username}"}
     
-    const shareInput = document.getElementById('shareUsernameInput');
-    const username = shareInput ? shareInput.value.trim() : '';
-    if (!username) {
-        alert('Ingrese un nombre de usuario');
-        return;
-    }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"Error compartiendo: {e}")
+        raise HTTPException(status_code=500, detail="Error al compartir")
 
-    const board = boards.find(b => b.id === boardId);
-    if (!board || board.owner_id !== currentUser) {
-        alert('No tienes permiso para compartir este tablero');
-        return;
-    }
+# ========== INVITACIONES ==========
 
-    if (username === currentUsername) {
-        alert('No puedes compartir un tablero contigo mismo');
-        return;
-    }
-
-    fetch(`${API_URL}/user/${username}/exists`)
-        .then(res => res.json())
-        .then(data => {
-            if (!data.exists) {
-                alert('El usuario no existe');
-                return;
-            }
-
-            if (board.shared_users && board.shared_users.includes(username)) {
-                alert('Este usuario ya tiene acceso');
-                return;
-            }
-
-            fetch(`${API_URL}/boards/${boardId}/share?username=${encodeURIComponent(username)}`, {
-                method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    'X-User-ID': currentUser
-                }
+@app.get("/api/invitations")
+def get_invitations(x_user_id: int = Header(...), db: Session = Depends(get_db)):
+    """Obtiene invitaciones pendientes del usuario"""
+    try:
+        db_user = db.query(DBUser).filter(DBUser.id == x_user_id).first()
+        if not db_user:
+            raise HTTPException(status_code=401, detail="Usuario no autenticado")
+        
+        invitations = db.query(DBInvitation).filter(
+            DBInvitation.user_id == x_user_id,
+            DBInvitation.status == "pending"
+        ).all()
+        
+        result = []
+        for inv in invitations:
+            result.append({
+                "id": inv.id,
+                "board_id": inv.board.id,
+                "board_title": inv.board.title,
+                "owner_username": inv.board.owner.username,
+                "status": inv.status,
+                "created_at": inv.created_at
             })
-            .then(res => res.json())
-            .then(data => {
-                if (data.ok || data.message) {
-                    alert('Invitación enviada a ' + username);
-                    if (shareInput) shareInput.value = '';
-                    if (board.pending_invitations === undefined) {
-                        board.pending_invitations = [];
-                    }
-                    board.pending_invitations.push(username);
-                    saveLocalBoards();
-                    renderBoardList();
-                } else {
-                    alert(data.detail || 'Error al enviar invitación');
-                }
-            })
-            .catch(err => {
-                console.error(err);
-                alert('Error al enviar invitación');
-            });
-        })
-        .catch(err => {
-            console.error(err);
-            alert('Error al verificar usuario');
-        });
-}
-
-function removeSharedUser(boardId, username) {
-    const board = boards.find(b => b.id === boardId);
-    if (!board || board.owner_id !== currentUser) return;
-
-    board.shared_users = board.shared_users.filter(u => u !== username);
-    saveLocalBoards();
-    renderCurrentSharedUsers(boardId);
-}
-
-function saveBoardSettings() {
-    const form = document.getElementById('boardSettingsForm');
-    if (!form) return;
-    const boardId = parseInt(form.dataset.boardId);
-    const board = boards.find(b => b.id === boardId);
+        
+        return {"invitations": result}
     
-    if (!board || board.owner_id !== currentUser) {
-        alert('No tienes permiso');
-        return;
-    }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error obteniendo invitaciones: {e}")
+        raise HTTPException(status_code=500, detail="Error al obtener invitaciones")
 
-    const titleInput = document.getElementById('boardSettingsTitle');
-    const descInput = document.getElementById('boardSettingsDescription');
-    const title = titleInput ? titleInput.value.trim() : '';
-    const description = descInput ? descInput.value.trim() : '';
-
-    if (!title) {
-        alert('El título no puede estar vacío');
-        return;
-    }
-
-    board.title = title;
-    board.description = description;
+@app.post("/api/invitations/{invitation_id}/accept")
+def accept_invitation(invitation_id: int, x_user_id: int = Header(...), db: Session = Depends(get_db)):
+    """Acepta una invitación de compartir tablero"""
+    try:
+        invitation = db.query(DBInvitation).filter(
+            DBInvitation.id == invitation_id,
+            DBInvitation.user_id == x_user_id
+        ).first()
+        
+        if not invitation:
+            raise HTTPException(status_code=404, detail="Invitación no encontrada")
+        
+        if invitation.status != "pending":
+            raise HTTPException(status_code=400, detail="La invitación ya fue procesada")
+        
+        # Agregar usuario a shared_users
+        invitation.board.shared_users.append(invitation.user)
+        invitation.status = "accepted"
+        db.commit()
+        
+        return {"ok": True, "message": "Tablero aceptado"}
     
-    if (board.id === currentBoardId) {
-        currentBoardData.title = title;
-        currentBoardData.description = description;
-        const boardNameEl = document.getElementById('current-board-name');
-        if (boardNameEl) boardNameEl.textContent = `/ ${title}`;
-    }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"Error aceptando invitación: {e}")
+        raise HTTPException(status_code=500, detail="Error al aceptar invitación")
 
-    saveLocalBoards();
-    closeBoardSettings();
-    renderBoardList();
-    alert('Configuración guardada');
-}
-
-function openBoardSelectorSettings() {
-    renderBoardList();
-    const modal = document.getElementById('boardSelectorModal');
-    if (modal) modal.showModal();
-}
-
-function createNewBoard() {
-    if (!currentUser) {
-        alert('Debes iniciar sesión para crear tableros');
-        closeBoardSelector();
-        openAuthModal();
-        return;
-    }
-
-    const boardForm = document.getElementById('boardForm');
-    if (boardForm) boardForm.reset();
-    const modalTitle = document.getElementById('boardModalTitle');
-    if (modalTitle) modalTitle.innerText = 'Crear Tablero';
-    pendingShareUsers = [];
-    const sharedUsersList = document.getElementById('sharedUsersList');
-    if (sharedUsersList) sharedUsersList.innerHTML = '';
-    const shareSection = document.getElementById('shareSection');
-    if (shareSection) shareSection.style.display = 'block';
+@app.post("/api/invitations/{invitation_id}/reject")
+def reject_invitation(invitation_id: int, x_user_id: int = Header(...), db: Session = Depends(get_db)):
+    """Rechaza una invitación de compartir tablero"""
+    try:
+        invitation = db.query(DBInvitation).filter(
+            DBInvitation.id == invitation_id,
+            DBInvitation.user_id == x_user_id
+        ).first()
+        
+        if not invitation:
+            raise HTTPException(status_code=404, detail="Invitación no encontrada")
+        
+        if invitation.status != "pending":
+            raise HTTPException(status_code=400, detail="La invitación ya fue procesada")
+        
+        invitation.status = "rejected"
+        db.commit()
+        
+        return {"ok": True, "message": "Invitación rechazada"}
     
-    const boardModal = document.getElementById('boardModal');
-    if (boardModal) {
-        boardModal.dataset.editBoardId = '';
-        boardModal.showModal();
-    }
-}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"Error rechazando invitación: {e}")
+        raise HTTPException(status_code=500, detail="Error al rechazar invitación")
 
-function closeBoardModal() {
-    const boardModal = document.getElementById('boardModal');
-    if (boardModal) {
-        boardModal.close();
-        boardModal.dataset.editBoardId = '';
-    }
-}
-
-function deleteBoard(boardId) {
-    if (!confirm('¿Eliminar este tablero?')) return;
-    boards = boards.filter(b => b.id !== boardId);
-    saveLocalBoards();
-    if (currentBoardId === boardId) {
-        currentBoardId = null;
-        localStorage.removeItem(STORAGE_KEY_CURRENT);
-        createDefaultBoard();
-    }
-    renderBoardList();
-    alert('Tablero eliminado');
-}
-
-function applyTheme() {
-    const theme = localStorage.getItem('kanban_theme_v2') || 'light';
-    document.documentElement.setAttribute('data-theme', theme);
-    const toggleBtn = document.getElementById('themeToggle');
-    if (toggleBtn) {
-        toggleBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
-    }
-}
-
-function renderBoard() {
-    const container = document.getElementById('boardColumns');
-    if (!container) return;
-    container.innerHTML = '';
-
-    currentBoardData.columnList.forEach(column => {
-        const columnEl = createColumnElement(column);
-        container.appendChild(columnEl);
-    });
-
-    const addColCard = document.createElement('div');
-    addColCard.className = 'add-column-card';
-    addColCard.innerHTML = '➕ Añadir nueva tabla';
-    addColCard.addEventListener('click', addNewColumn);
-    container.appendChild(addColCard);
-}
-
-function createColumnElement(column) {
-    const columnDiv = document.createElement('section');
-    columnDiv.className = 'column';
-    columnDiv.dataset.columnId = column.id;
-    columnDiv.draggable = true;
-
-    const taskIds = currentBoardData.columns[column.id] || [];
-    const cards = taskIds.map(id => currentBoardData.tasks[id]).filter(task => task && matchesSearch(task));
-
-    const headerDiv = document.createElement('div');
-    headerDiv.className = 'column-header';
-    headerDiv.style.backgroundColor = column.color;
+@app.delete("/api/boards/{board_id}")
+def delete_board(board_id: int, x_user_id: int = Header(...), db: Session = Depends(get_db)):
+    """Elimina un tablero"""
+    try:
+        board = db.query(DBBoard).filter(
+            DBBoard.id == board_id,
+            DBBoard.owner_id == x_user_id
+        ).first()
+        
+        if not board:
+            raise HTTPException(status_code=404, detail="Tablero no encontrado")
+        
+        db.delete(board)
+        db.commit()
+        return {"ok": True}
     
-    const canDelete = currentBoardData.columnList.length > 1;
-    const deleteBtnHtml = canDelete ? `<button class="btn btn-danger btn-small" onclick="deleteColumn('${column.id}')">🗑️</button>` : '';
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"Error eliminando tablero: {e}")
+        raise HTTPException(status_code=500, detail="Error al eliminar")
 
-    headerDiv.innerHTML = `
-        <div class="column-title-wrapper">
-            <input type="color" class="column-color-picker" value="${column.color}" onchange="updateColumnColor('${column.id}', this.value)">
-            <span class="column-title">${escapeHtml(column.title)}</span>
-        </div>
-        <div class="column-header-actions">
-            <span class="column-count">${cards.length}</span>
-            ${deleteBtnHtml}
-        </div>
-    `;
-
-    const cardsContainer = document.createElement('div');
-    cardsContainer.className = 'cards-container';
-    cardsContainer.dataset.columnId = column.id;
-
-    if (cards.length === 0) {
-        const emptyDiv = document.createElement('div');
-        emptyDiv.className = 'empty-state';
-        emptyDiv.textContent = 'Sin tareas';
-        cardsContainer.appendChild(emptyDiv);
-    } else {
-        cards.forEach(task => {
-            cardsContainer.appendChild(createCardElement(task));
-        });
-    }
-
-    columnDiv.appendChild(headerDiv);
-    columnDiv.appendChild(cardsContainer);
-
-    columnDiv.addEventListener('dragstart', handleColumnDragStart);
-    columnDiv.addEventListener('dragend', handleColumnDragEnd);
-    columnDiv.addEventListener('dragover', handleColumnDragOver);
-    columnDiv.addEventListener('drop', handleColumnDrop);
-
-    return columnDiv;
-}
-
-function handleColumnDragStart(e) {
-    if (e.target.closest('.card') || e.target.closest('button') || e.target.closest('input')) {
-        e.preventDefault();
-        return;
-    }
-    draggedColumnId = e.currentTarget.dataset.columnId;
-    e.dataTransfer.effectAllowed = 'move';
-    e.currentTarget.classList.add('dragging');
-}
-
-function handleColumnDragEnd(e) {
-    e.currentTarget.classList.remove('dragging');
-    draggedColumnId = null;
-    document.querySelectorAll('.column').forEach(col => col.classList.remove('drag-over'));
-}
-
-function handleColumnDragOver(e) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    const targetColumn = e.target.closest('.column');
-    if (targetColumn && draggedColumnId) {
-        document.querySelectorAll('.column').forEach(col => col.classList.remove('drag-over'));
-        targetColumn.classList.add('drag-over');
-    }
-}
-
-function handleColumnDrop(e) {
-    e.preventDefault();
-    const targetColumnEl = e.target.closest('.column');
-    if (!targetColumnEl || !draggedColumnId) return;
-
-    const targetColumnId = targetColumnEl.dataset.columnId;
-    if (draggedColumnId === targetColumnId) return;
-
-    const oldIndex = currentBoardData.columnList.findIndex(c => c.id === draggedColumnId);
-    const newIndex = currentBoardData.columnList.findIndex(c => c.id === targetColumnId);
-
-    if (oldIndex !== -1 && newIndex !== -1) {
-        const [movedCol] = currentBoardData.columnList.splice(oldIndex, 1);
-        currentBoardData.columnList.splice(newIndex, 0, movedCol);
-        saveCurrentBoard();
-        renderBoard();
-    }
-}
-
-function addNewColumn() {
-    const title = prompt('Nombre de la nueva tabla:');
-    if (!title || !title.trim()) return;
-
-    const pastelColors = ['#bfdbfe', '#fef08a', '#fbcfe8', '#bbf7d0', '#ddd6fe', '#fed7aa', '#99f6e4'];
-    const randomColor = pastelColors[Math.floor(Math.random() * pastelColors.length)];
-
-    const newCol = {
-        id: 'col_' + Date.now(),
-        title: title.trim(),
-        color: randomColor
-    };
+@app.get("/api/user/{username}/exists")
+def user_exists(username: str, db: Session = Depends(get_db)):
+    """Verifica si un usuario existe"""
+    try:
+        user = db.query(DBUser).filter(DBUser.username == username).first()
+        return {"exists": user is not None}
+    except Exception as e:
+        print(f"Error verificando usuario: {e}")
+        raise HTTPException(status_code=500, detail="Error")
     
-    currentBoardData.columnList.push(newCol);
-    currentBoardData.columns[newCol.id] = [];
-    saveCurrentBoard();
-    renderBoard();
-}
-
-function deleteColumn(columnId) {
-    if (!confirm('¿Eliminar esta columna y sus tareas?')) return;
-
-    const taskIds = currentBoardData.columns[columnId] || [];
-    taskIds.forEach(taskId => {
-        delete currentBoardData.tasks[taskId];
-    });
-
-    delete currentBoardData.columns[columnId];
-    currentBoardData.columnList = currentBoardData.columnList.filter(col => col.id !== columnId);
-
-    saveCurrentBoard();
-    renderBoard();
-}
-
-function updateColumnColor(columnId, color) {
-    const col = currentBoardData.columnList.find(c => c.id === columnId);
-    if (col) {
-        col.color = color;
-        saveCurrentBoard();
-        renderBoard();
-    }
-}
-
-function createCardElement(task) {
-    const cardDiv = document.createElement('article');
-    cardDiv.className = 'card';
-    cardDiv.draggable = true;
-    cardDiv.dataset.taskId = task.id;
-
-    const priorityText = { high: 'Alta', medium: 'Media', low: 'Baja' }[task.priority] || task.priority;
-    const dueDateHtml = task.dueDate ? `<div class="due-date">📅 ${escapeHtml(task.dueDate)}</div>` : '';
-    const specsHtml = task.specs && task.specs.length > 0 ? `<div class="card-specs">${task.specs.map(s => `<span class="spec-tag">${escapeHtml(s.key)}: ${escapeHtml(s.value)}</span>`).join('')}</div>` : '';
-
-    cardDiv.innerHTML = `
-        <div class="card-header">
-            <div class="card-title">${escapeHtml(task.title)}</div>
-            <span class="priority-badge priority-${escapeHtml(task.priority)}">${priorityText}</span>
-        </div>
-        ${task.description ? `<div class="card-description">${escapeHtml(task.description)}</div>` : ''}
-        ${specsHtml}
-        <div class="card-meta">
-            <div></div>
-            ${dueDateHtml}
-        </div>
-        <div class="card-actions">
-            <button class="btn btn-secondary btn-small" onclick="editTask(${task.id})">✏️</button>
-            <button class="btn btn-danger btn-small" onclick="deleteTask(${task.id})">🗑️</button>
-        </div>
-    `;
-
-    cardDiv.addEventListener('dragstart', handleCardDragStart);
-    cardDiv.addEventListener('dragend', handleCardDragEnd);
-
-    return cardDiv;
-}
-
-function matchesSearch(task) {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    return task.title.toLowerCase().includes(query) || (task.description && task.description.toLowerCase().includes(query));
-}
-
-function handleCardDragStart(e) {
-    e.stopPropagation();
-    const cardEl = e.target.closest('.card');
-    if (!cardEl) return;
-    const taskId = parseInt(cardEl.dataset.taskId);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', taskId);
-    cardEl.classList.add('dragging');
-}
-
-function handleCardDragEnd(e) {
-    e.stopPropagation();
-    const cardEl = e.target.closest('.card');
-    if (cardEl) cardEl.classList.remove('dragging');
-}
-
-function handleCardDragOver(e) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-}
-
-function handleCardDrop(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    const taskIdStr = e.dataTransfer.getData('text/plain');
-    if (!taskIdStr) return;
-    const taskId = parseInt(taskIdStr);
-    const targetContainer = e.target.closest('.cards-container');
-    const newColumnId = targetContainer?.dataset.columnId;
-
-    if (newColumnId && !isNaN(taskId)) {
-        moveTask(taskId, newColumnId);
-    }
-}
-
-function moveTask(taskId, newColumnId) {
-    const task = currentBoardData.tasks[taskId];
-    if (!task) return;
-
-    const oldColumnId = Object.keys(currentBoardData.columns).find(colId =>
-        currentBoardData.columns[colId].includes(taskId)
-    );
-
-    if (oldColumnId !== newColumnId) {
-        currentBoardData.columns[oldColumnId] = currentBoardData.columns[oldColumnId].filter(id => id !== taskId);
-        if (!currentBoardData.columns[newColumnId]) {
-            currentBoardData.columns[newColumnId] = [];
-        }
-        currentBoardData.columns[newColumnId].push(taskId);
-        saveCurrentBoard();
-        renderBoard();
-    }
-}
-
-function addSpecField(containerId, key = '', value = '') {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-    
-    const row = document.createElement('div');
-    row.className = 'spec-row';
-    row.innerHTML = `
-        <input type="text" class="form-input spec-key" placeholder="Clave" value="${escapeHtml(key)}">
-        <input type="text" class="form-input spec-val" placeholder="Valor" value="${escapeHtml(value)}">
-        <button type="button" class="btn btn-danger btn-small" onclick="this.closest('.spec-row').remove()">✕</button>
-    `;
-    container.appendChild(row);
-}
-
-function getSpecsFromContainer(containerId) {
-    const container = document.getElementById(containerId);
-    if (!container) return [];
-    
-    const rows = container.querySelectorAll('.spec-row');
-    const specs = [];
-    rows.forEach(row => {
-        const keyInput = row.querySelector('.spec-key');
-        const valInput = row.querySelector('.spec-val');
-        const k = keyInput ? keyInput.value.trim() : '';
-        const v = valInput ? valInput.value.trim() : '';
-        if (k || v) {
-            specs.push({ key: k || 'Campo', value: v || '' });
-        }
-    });
-    return specs;
-}
-
-function openTaskModal() {
-    const form = document.getElementById('taskForm');
-    if (form) form.reset();
-    const container = document.getElementById('taskSpecsContainer');
-    if (container) {
-        container.innerHTML = '';
-        addSpecField('taskSpecsContainer');
-    }
-    const modal = document.getElementById('taskModal');
-    if (modal) modal.showModal();
-}
-
-function closeTaskModal() {
-    const modal = document.getElementById('taskModal');
-    if (modal) modal.close();
-}
-
-function openEditModal(taskId) {
-    const task = currentBoardData.tasks[taskId];
-    if (!task) return;
-
-    currentEditingTaskId = taskId;
-    const editTitle = document.getElementById('editTitle');
-    const editDesc = document.getElementById('editDescription');
-    const editPriority = document.getElementById('editPriority');
-    const editDueDate = document.getElementById('editDueDate');
-
-    if (editTitle) editTitle.value = task.title;
-    if (editDesc) editDesc.value = task.description || '';
-    if (editPriority) editPriority.value = task.priority;
-    if (editDueDate) editDueDate.value = task.dueDate || '';
-    
-    const container = document.getElementById('editSpecsContainer');
-    if (container) {
-        container.innerHTML = '';
-        if (task.specs && task.specs.length > 0) {
-            task.specs.forEach(s => addSpecField('editSpecsContainer', s.key, s.value));
-        } else {
-            addSpecField('editSpecsContainer');
-        }
-    }
-
-    const editModal = document.getElementById('editModal');
-    if (editModal) editModal.showModal();
-}
-
-function closeEditModal() {
-    const editModal = document.getElementById('editModal');
-    if (editModal) editModal.close();
-    currentEditingTaskId = null;
-}
-
-function editTask(taskId) {
-    openEditModal(taskId);
-}
-
-function deleteTask(taskId) {
-    if (!confirm('¿Eliminar?')) return;
-
-    const columnId = Object.keys(currentBoardData.columns).find(colId =>
-        currentBoardData.columns[colId].includes(taskId)
-    );
-
-    if (columnId) {
-        currentBoardData.columns[columnId] = currentBoardData.columns[columnId].filter(id => id !== taskId);
-    }
-
-    delete currentBoardData.tasks[taskId];
-    saveCurrentBoard();
-    renderBoard();
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text || '';
-    return div.innerHTML;
-}
-
-function closeSettingsModal() {
-    const modal = document.getElementById('settingsModal');
-    if (modal) modal.close();
-}
-
-function openSettingsModal() {
-    const content = document.getElementById('boardSettingsContent');
-    const isOwner = currentBoardData.owner_id === currentUser;
-    
-    if (content) {
-        content.innerHTML = `
-            <div class="settings-info">
-                <h3>Información del Tablero</h3>
-                <p><strong>Título:</strong> ${escapeHtml(currentBoardData.title)}</p>
-                <p><strong>Descripción:</strong> ${escapeHtml(currentBoardData.description || 'Sin descripción')}</p>
-                <p><strong>Estado:</strong> ${isOwner ? 'Eres propietario' : 'Compartido contigo'}</p>
-                ${currentBoardData.shared_users && currentBoardData.shared_users.length > 0 ? `<p><strong>Compartido con:</strong> ${escapeHtml(currentBoardData.shared_users.join(', '))}</p>` : ''}
-            </div>
-        `;
-    }
-    
-    const modal = document.getElementById('settingsModal');
-    if (modal) modal.showModal();
-}
-
-function attachMainEventListeners() {
-    const newTaskBtn = document.getElementById('newTaskBtn');
-    const boardsBtn = document.getElementById('boardsBtn');
-    const authBtn = document.getElementById('authBtn');
-    const logoutBtn = document.getElementById('logoutBtn');
-    const settingsBtn = document.getElementById('settingsBtn');
-
-    if (newTaskBtn) newTaskBtn.addEventListener('click', openTaskModal);
-    if (boardsBtn) boardsBtn.addEventListener('click', openBoardSelector);
-    if (authBtn) authBtn.addEventListener('click', openAuthModal);
-    if (logoutBtn) logoutBtn.addEventListener('click', logout);
-    if (settingsBtn) settingsBtn.addEventListener('click', openSettingsModal);
-
-    const taskForm = document.getElementById('taskForm');
-    if (taskForm) {
-        taskForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const taskId = currentBoardData.nextId++;
-            const titleInput = document.getElementById('taskTitle');
-            const descInput = document.getElementById('taskDescription');
-            const priorityInput = document.getElementById('taskPriority');
-            const dueInput = document.getElementById('taskDueDate');
-
-            const task = {
-                id: taskId,
-                title: titleInput ? titleInput.value : '',
-                description: descInput ? descInput.value : '',
-                priority: priorityInput ? priorityInput.value : 'medium',
-                dueDate: dueInput ? dueInput.value : '',
-                specs: getSpecsFromContainer('taskSpecsContainer'),
-                createdAt: new Date().toISOString()
-            };
-
-            currentBoardData.tasks[taskId] = task;
-            const firstColId = currentBoardData.columnList[0]?.id || 'todo';
-            if (!currentBoardData.columns[firstColId]) currentBoardData.columns[firstColId] = [];
-            currentBoardData.columns[firstColId].push(taskId);
-
-            saveCurrentBoard();
-            renderBoard();
-            closeTaskModal();
-        });
-    }
-
-    const editForm = document.getElementById('editForm');
-    if (editForm) {
-        editForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            if (currentEditingTaskId === null) return;
-
-            const task = currentBoardData.tasks[currentEditingTaskId];
-            const editTitle = document.getElementById('editTitle');
-            const editDesc = document.getElementById('editDescription');
-            const editPriority = document.getElementById('editPriority');
-            const editDue = document.getElementById('editDueDate');
-
-            if (task) {
-                task.title = editTitle ? editTitle.value : task.title;
-                task.description = editDesc ? editDesc.value : task.description;
-                task.priority = editPriority ? editPriority.value : task.priority;
-                task.dueDate = editDue ? editDue.value : task.dueDate;
-                task.specs = getSpecsFromContainer('editSpecsContainer');
-            }
-
-            saveCurrentBoard();
-            renderBoard();
-            closeEditModal();
-        });
-    }
-
-    const boardForm = document.getElementById('boardForm');
-    if (boardForm) {
-        boardForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const titleInput = document.getElementById('boardTitle');
-            const descInput = document.getElementById('boardDescription');
-            const boardModal = document.getElementById('boardModal');
-
-            const title = titleInput ? titleInput.value : '';
-            const description = descInput ? descInput.value : '';
-            const editBoardId = boardModal ? boardModal.dataset.editBoardId : '';
-
-            if (editBoardId) {
-                const board = boards.find(b => b.id === parseInt(editBoardId));
-                if (board) {
-                    board.title = title;
-                    board.description = description;
-                    if (board.id === currentBoardId) {
-                        currentBoardData = JSON.parse(JSON.stringify(board));
-                        const boardNameEl = document.getElementById('current-board-name');
-                        if (boardNameEl) boardNameEl.textContent = `/ ${title}`;
-                    }
-                }
-            } else {
-                const newBoard = {
-                    id: Date.now(),
-                    title: title,
-                    description: description,
-                    tasks: {},
-                    nextId: 1,
-                    columnList: DEFAULT_COLUMNS.map(c => ({ ...c })),
-                    columns: {},
-                    owner_id: currentUser,
-                    shared_users: [],
-                    created_at: new Date().toISOString()
-                };
-
-                DEFAULT_COLUMNS.forEach(col => {
-                    newBoard.columns[col.id] = [];
-                });
-
-                boards.push(newBoard);
-            }
-
-            saveLocalBoards();
-            closeBoardModal();
-            renderBoardList();
-        });
-    }
-
-    const boardSettingsForm = document.getElementById('boardSettingsForm');
-    if (boardSettingsForm) {
-        boardSettingsForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            saveBoardSettings();
-        });
-    }
-
-    const searchInput = document.getElementById('searchInput');
-    if (searchInput) {
-        searchInput.addEventListener('input', (e) => {
-            searchQuery = e.target.value;
-            renderBoard();
-        });
-    }
-
-    const themeToggle = document.getElementById('themeToggle');
-    if (themeToggle) {
-        themeToggle.addEventListener('click', () => {
-            const html = document.documentElement;
-            const currentTheme = html.getAttribute('data-theme') || 'light';
-            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-            html.setAttribute('data-theme', newTheme);
-            localStorage.setItem('kanban_theme_v2', newTheme);
-            themeToggle.textContent = newTheme === 'dark' ? '☀️' : '🌙';
-        });
-    }
-
-    document.addEventListener('dragover', (e) => {
-        if (e.target.closest('.cards-container')) {
-            handleCardDragOver(e);
-        }
-    });
-
-    document.addEventListener('drop', (e) => {
-        if (e.target.closest('.cards-container')) {
-            handleCardDrop(e);
-        }
-    });
-}
