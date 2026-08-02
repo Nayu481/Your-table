@@ -1,4 +1,6 @@
-const API_URL = 'https://your-table.onrender.com';
+// ✅ CORRECCIÓN DEFINITIVA
+const API_URL = 'https://your-table.onrender.com/api';  // ← ASEGÚRATE QUE TERMINA EN /api
+
 const STORAGE_KEY_BOARDS = 'kanban_boards_v2';
 const STORAGE_KEY_CURRENT = 'kanban_current_board_v2';
 
@@ -99,10 +101,7 @@ function loadBoard(boardId) {
     currentBoardId = boardId;
     currentBoardData = JSON.parse(JSON.stringify(board));
     localStorage.setItem(STORAGE_KEY_CURRENT, currentBoardId);
-    const boardNameEl = document.getElementById('current-board-name');
-    if (boardNameEl) {
-        boardNameEl.textContent = `/ ${currentBoardData.title}`;
-    }
+    document.getElementById('current-board-name').textContent = `/ ${currentBoardData.title}`;
     renderBoard();
 }
 
@@ -123,19 +122,15 @@ function setupAuthListeners() {
             e.preventDefault();
             isRegistering = !isRegistering;
             
-            const authTitle = document.getElementById('authTitle');
-            const authSubmitBtn = document.getElementById('auth-submit-btn');
-            const authToggleText = document.getElementById('auth-toggle-text');
-
             if (isRegistering) {
-                if (authTitle) authTitle.innerText = 'Registrarse';
-                if (authSubmitBtn) authSubmitBtn.innerText = 'Registrarse';
-                if (authToggleText) authToggleText.innerText = '¿Ya tienes cuenta?';
+                document.getElementById('authTitle').innerText = 'Registrarse';
+                document.getElementById('auth-submit-btn').innerText = 'Registrarse';
+                document.getElementById('auth-toggle-text').innerText = '¿Ya tienes cuenta?';
                 toggleBtn.innerText = 'Inicia sesión';
             } else {
-                if (authTitle) authTitle.innerText = 'Iniciar Sesión';
-                if (authSubmitBtn) authSubmitBtn.innerText = 'Entrar';
-                if (authToggleText) authToggleText.innerText = '¿No tienes cuenta?';
+                document.getElementById('authTitle').innerText = 'Iniciar Sesión';
+                document.getElementById('auth-submit-btn').innerText = 'Entrar';
+                document.getElementById('auth-toggle-text').innerText = '¿No tienes cuenta?';
                 toggleBtn.innerText = 'Regístrate';
             }
         });
@@ -145,10 +140,8 @@ function setupAuthListeners() {
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            const usernameInput = document.getElementById('auth-username');
-            const passwordInput = document.getElementById('auth-password');
-            const username = usernameInput ? usernameInput.value.trim() : '';
-            const password = passwordInput ? passwordInput.value : '';
+            const username = document.getElementById('auth-username').value.trim();
+            const password = document.getElementById('auth-password').value;
 
             if (!username || !password) {
                 alert('Por favor completa todos los campos');
@@ -156,8 +149,7 @@ function setupAuthListeners() {
             }
 
             try {
-                // CORRECCIÓN: Se agregó el prefijo /api requerido por el backend
-                const endpoint = isRegistering ? '/api/register' : '/api/login';
+                const endpoint = isRegistering ? '/register' : '/login';
                 const body = JSON.stringify({ username, password });
 
                 const res = await fetch(`${API_URL}${endpoint}`, {
@@ -166,8 +158,7 @@ function setupAuthListeners() {
                     body: body
                 });
 
-                const text = await res.text();
-                const data = text ? JSON.parse(text) : {};
+                const data = await res.json();
                 
                 if (res.ok) {
                     localStorage.setItem('kanban_user_id', data.id);
@@ -180,9 +171,10 @@ function setupAuthListeners() {
                     closeAuthModal();
                     
                     if (isRegistering) {
-                        alert('¡Cuenta creada con éxito!');
+                        alert('¡Cuenta creada! Inicia sesión.');
                         isRegistering = false;
-                        form.reset();
+                        document.getElementById('auth-form').reset();
+                        openAuthModal();
                     } else {
                         alert('¡Sesión iniciada!');
                     }
@@ -198,25 +190,17 @@ function setupAuthListeners() {
 }
 
 function openAuthModal() {
-    const form = document.getElementById('auth-form');
-    if (form) form.reset();
+    document.getElementById('auth-form').reset();
     isRegistering = false;
-    const authTitle = document.getElementById('authTitle');
-    const authSubmitBtn = document.getElementById('auth-submit-btn');
-    const authToggleText = document.getElementById('auth-toggle-text');
-    const authToggleBtn = document.getElementById('auth-toggle-btn');
-    const authModal = document.getElementById('authModal');
-
-    if (authTitle) authTitle.innerText = 'Iniciar Sesión';
-    if (authSubmitBtn) authSubmitBtn.innerText = 'Entrar';
-    if (authToggleText) authToggleText.innerText = '¿No tienes cuenta?';
-    if (authToggleBtn) authToggleBtn.innerText = 'Regístrate';
-    if (authModal) authModal.showModal();
+    document.getElementById('authTitle').innerText = 'Iniciar Sesión';
+    document.getElementById('auth-submit-btn').innerText = 'Entrar';
+    document.getElementById('auth-toggle-text').innerText = '¿No tienes cuenta?';
+    document.getElementById('auth-toggle-btn').innerText = 'Regístrate';
+    document.getElementById('authModal').showModal();
 }
 
 function closeAuthModal() {
-    const modal = document.getElementById('authModal');
-    if (modal) modal.close();
+    document.getElementById('authModal').close();
 }
 
 function updateUserDisplay() {
@@ -225,13 +209,13 @@ function updateUserDisplay() {
     const logoutBtn = document.getElementById('logoutBtn');
 
     if (currentUser) {
-        if (userDisplay) userDisplay.innerText = `👤 ${currentUsername}`;
-        if (authBtn) authBtn.style.display = 'none';
-        if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+        userDisplay.innerText = `👤 ${currentUsername}`;
+        authBtn.style.display = 'none';
+        logoutBtn.style.display = 'inline-flex';
     } else {
-        if (userDisplay) userDisplay.innerText = 'No conectado';
-        if (authBtn) authBtn.style.display = 'inline-flex';
-        if (logoutBtn) logoutBtn.style.display = 'none';
+        userDisplay.innerText = 'No conectado';
+        authBtn.style.display = 'inline-flex';
+        logoutBtn.style.display = 'none';
     }
 }
 
@@ -249,29 +233,24 @@ function logout() {
 function openBoardSelector() {
     renderBoardList();
     loadInvitations();
-    const modal = document.getElementById('boardSelectorModal');
-    if (modal) modal.showModal();
+    document.getElementById('boardSelectorModal').showModal();
 }
 
 function closeBoardSelector() {
-    const modal = document.getElementById('boardSelectorModal');
-    if (modal) modal.close();
+    document.getElementById('boardSelectorModal').close();
 }
 
 function openInvitationsModal() {
-    const modal = document.getElementById('invitationsModal');
-    if (modal) modal.showModal();
+    document.getElementById('invitationsModal').showModal();
 }
 
 function closeInvitationsModal() {
-    const modal = document.getElementById('invitationsModal');
-    if (modal) modal.close();
+    document.getElementById('invitationsModal').close();
 }
 
 function loadInvitations() {
-    const invitationsBtn = document.getElementById('invitationsBtn');
     if (!currentUser) {
-        if (invitationsBtn) invitationsBtn.style.display = 'none';
+        document.getElementById('invitationsBtn').style.display = 'none';
         return;
     }
 
@@ -281,15 +260,14 @@ function loadInvitations() {
     })
     .then(res => res.json())
     .then(data => {
-        const count = data.invitations ? data.invitations.length : 0;
-        const countEl = document.getElementById('invitationsCount');
-        if (countEl) countEl.textContent = count;
+        const count = data.invitations?.length || 0;
+        document.getElementById('invitationsCount').textContent = count;
         
         if (count > 0) {
-            if (invitationsBtn) invitationsBtn.style.display = 'inline-flex';
+            document.getElementById('invitationsBtn').style.display = 'inline-flex';
             renderInvitations(data.invitations);
         } else {
-            if (invitationsBtn) invitationsBtn.style.display = 'none';
+            document.getElementById('invitationsBtn').style.display = 'none';
         }
     })
     .catch(err => console.error('Error cargando invitaciones:', err));
@@ -297,7 +275,6 @@ function loadInvitations() {
 
 function renderInvitations(invitations) {
     const container = document.getElementById('invitationsList');
-    if (!container) return;
     
     if (!invitations || invitations.length === 0) {
         container.innerHTML = '<div class="empty-invitations">No tienes invitaciones pendientes</div>';
@@ -331,7 +308,6 @@ function acceptInvitation(invitationId) {
     .then(data => {
         alert('Tablero aceptado');
         loadInvitations();
-        renderInvitations([]);
     })
     .catch(err => {
         console.error('Error:', err);
@@ -350,7 +326,6 @@ function rejectInvitation(invitationId) {
     .then(data => {
         alert('Invitación rechazada');
         loadInvitations();
-        renderInvitations([]);
     })
     .catch(err => {
         console.error('Error:', err);
@@ -360,7 +335,6 @@ function rejectInvitation(invitationId) {
 
 function renderBoardList() {
     const container = document.getElementById('boardList');
-    if (!container) return;
     container.innerHTML = '';
 
     boards.forEach(board => {
@@ -397,32 +371,41 @@ function renderBoardList() {
     });
 }
 
+function createNewBoard() {
+    if (!currentUser) {
+        alert('Debes iniciar sesión para crear tableros');
+        closeBoardSelector();
+        openAuthModal();
+        return;
+    }
+
+    document.getElementById('boardForm').reset();
+    document.getElementById('boardModalTitle').innerText = 'Crear Tablero';
+    document.getElementById('sharedUsersList').innerHTML = '';
+    document.getElementById('shareSection').style.display = 'block';
+    document.getElementById('boardModal').dataset.editBoardId = '';
+    document.getElementById('boardModal').showModal();
+}
+
 function openBoardSettings(boardId) {
     const board = boards.find(b => b.id === boardId);
     if (!board || board.owner_id !== currentUser) return;
 
-    const titleInput = document.getElementById('boardSettingsTitle');
-    const descInput = document.getElementById('boardSettingsDescription');
-    const form = document.getElementById('boardSettingsForm');
-    const modal = document.getElementById('boardSettingsModal');
-
-    if (titleInput) titleInput.value = board.title;
-    if (descInput) descInput.value = board.description || '';
-    if (form) form.dataset.boardId = boardId;
+    document.getElementById('boardSettingsTitle').value = board.title;
+    document.getElementById('boardSettingsDescription').value = board.description || '';
+    document.getElementById('boardSettingsForm').dataset.boardId = boardId;
     
     renderCurrentSharedUsers(boardId);
-    if (modal) modal.showModal();
+    document.getElementById('boardSettingsModal').showModal();
 }
 
 function closeBoardSettings() {
-    const modal = document.getElementById('boardSettingsModal');
-    if (modal) modal.close();
+    document.getElementById('boardSettingsModal').close();
 }
 
 function renderCurrentSharedUsers(boardId) {
     const board = boards.find(b => b.id === boardId);
     const container = document.getElementById('currentSharedUsers');
-    if (!container) return;
     container.innerHTML = '';
 
     if (!board || !board.shared_users || board.shared_users.length === 0) {
@@ -434,8 +417,8 @@ function renderCurrentSharedUsers(boardId) {
         const item = document.createElement('div');
         item.className = 'shared-user-item';
         item.innerHTML = `
-            <span>${escapeHtml(username)}</span>
-            <button type="button" class="shared-user-remove" onclick="removeSharedUser(${boardId}, '${escapeHtml(username)}')">✕</button>
+            <span>${username}</span>
+            <button type="button" class="shared-user-remove" onclick="removeSharedUser(${boardId}, '${username}')">✕</button>
         `;
         container.appendChild(item);
     });
@@ -465,6 +448,7 @@ function addBoardShareUser(boardId) {
         return;
     }
 
+    // ✅ RUTA ARREGLADA - Sin duplicar /api
     fetch(`${API_URL}/user/${username}/exists`)
         .then(res => res.json())
         .then(data => {
@@ -478,35 +462,38 @@ function addBoardShareUser(boardId) {
                 return;
             }
 
+            // ✅ RUTA ARREGLADA - Sin duplicar /api
             fetch(`${API_URL}/boards/${boardId}/share?username=${encodeURIComponent(username)}`, {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
-                    'X-User-ID': currentUser
+                    'X-User-Id': currentUser
                 }
             })
             .then(res => res.json())
             .then(data => {
                 if (data.ok || data.message) {
-                    alert('Invitación enviada a ' + username);
-                    if (shareInput) shareInput.value = '';
-                    if (board.pending_invitations === undefined) {
-                        board.pending_invitations = [];
+                    if (board.shared_users && board.shared_users.includes(username)) {
+                        alert('Este usuario ya tiene acceso');
+                        return;
                     }
-                    board.pending_invitations.push(username);
+                    board.shared_users = board.shared_users || [];
+                    board.shared_users.push(username);
+                    shareInput.value = '';
                     saveLocalBoards();
-                    renderBoardList();
+                    renderCurrentSharedUsers(boardId);
+                    alert(`Invitación enviada a ${username}`);
                 } else {
-                    alert(data.detail || 'Error al enviar invitación');
+                    alert(data.detail || data.message || 'Error al compartir');
                 }
             })
             .catch(err => {
-                console.error(err);
-                alert('Error al enviar invitación');
+                console.error('Error en compartir:', err);
+                alert('Error al compartir el tablero');
             });
         })
         .catch(err => {
-            console.error(err);
+            console.error('Error verificando usuario:', err);
             alert('Error al verificar usuario');
         });
 }
@@ -521,9 +508,7 @@ function removeSharedUser(boardId, username) {
 }
 
 function saveBoardSettings() {
-    const form = document.getElementById('boardSettingsForm');
-    if (!form) return;
-    const boardId = parseInt(form.dataset.boardId);
+    const boardId = parseInt(document.getElementById('boardSettingsForm').dataset.boardId);
     const board = boards.find(b => b.id === boardId);
     
     if (!board || board.owner_id !== currentUser) {
@@ -531,10 +516,8 @@ function saveBoardSettings() {
         return;
     }
 
-    const titleInput = document.getElementById('boardSettingsTitle');
-    const descInput = document.getElementById('boardSettingsDescription');
-    const title = titleInput ? titleInput.value.trim() : '';
-    const description = descInput ? descInput.value.trim() : '';
+    const title = document.getElementById('boardSettingsTitle').value.trim();
+    const description = document.getElementById('boardSettingsDescription').value.trim();
 
     if (!title) {
         alert('El título no puede estar vacío');
@@ -547,53 +530,13 @@ function saveBoardSettings() {
     if (board.id === currentBoardId) {
         currentBoardData.title = title;
         currentBoardData.description = description;
-        const boardNameEl = document.getElementById('current-board-name');
-        if (boardNameEl) boardNameEl.textContent = `/ ${title}`;
+        document.getElementById('current-board-name').textContent = `/ ${title}`;
     }
 
     saveLocalBoards();
     closeBoardSettings();
     renderBoardList();
     alert('Configuración guardada');
-}
-
-function openBoardSelectorSettings() {
-    renderBoardList();
-    const modal = document.getElementById('boardSelectorModal');
-    if (modal) modal.showModal();
-}
-
-function createNewBoard() {
-    if (!currentUser) {
-        alert('Debes iniciar sesión para crear tableros');
-        closeBoardSelector();
-        openAuthModal();
-        return;
-    }
-
-    const boardForm = document.getElementById('boardForm');
-    if (boardForm) boardForm.reset();
-    const modalTitle = document.getElementById('boardModalTitle');
-    if (modalTitle) modalTitle.innerText = 'Crear Tablero';
-    pendingShareUsers = [];
-    const sharedUsersList = document.getElementById('sharedUsersList');
-    if (sharedUsersList) sharedUsersList.innerHTML = '';
-    const shareSection = document.getElementById('shareSection');
-    if (shareSection) shareSection.style.display = 'block';
-    
-    const boardModal = document.getElementById('boardModal');
-    if (boardModal) {
-        boardModal.dataset.editBoardId = '';
-        boardModal.showModal();
-    }
-}
-
-function closeBoardModal() {
-    const boardModal = document.getElementById('boardModal');
-    if (boardModal) {
-        boardModal.close();
-        boardModal.dataset.editBoardId = '';
-    }
 }
 
 function deleteBoard(boardId) {
@@ -782,14 +725,14 @@ function createCardElement(task) {
     cardDiv.draggable = true;
     cardDiv.dataset.taskId = task.id;
 
-    const priorityText = { high: 'Alta', medium: 'Media', low: 'Baja' }[task.priority] || task.priority;
-    const dueDateHtml = task.dueDate ? `<div class="due-date">📅 ${escapeHtml(task.dueDate)}</div>` : '';
+    const priorityText = { high: 'Alta', medium: 'Media', low: 'Baja' }[task.priority];
+    const dueDateHtml = task.dueDate ? `<div class="due-date">📅 ${task.dueDate}</div>` : '';
     const specsHtml = task.specs && task.specs.length > 0 ? `<div class="card-specs">${task.specs.map(s => `<span class="spec-tag">${escapeHtml(s.key)}: ${escapeHtml(s.value)}</span>`).join('')}</div>` : '';
 
     cardDiv.innerHTML = `
         <div class="card-header">
             <div class="card-title">${escapeHtml(task.title)}</div>
-            <span class="priority-badge priority-${escapeHtml(task.priority)}">${priorityText}</span>
+            <span class="priority-badge priority-${task.priority}">${priorityText}</span>
         </div>
         ${task.description ? `<div class="card-description">${escapeHtml(task.description)}</div>` : ''}
         ${specsHtml}
@@ -817,18 +760,15 @@ function matchesSearch(task) {
 
 function handleCardDragStart(e) {
     e.stopPropagation();
-    const cardEl = e.target.closest('.card');
-    if (!cardEl) return;
-    const taskId = parseInt(cardEl.dataset.taskId);
+    const taskId = parseInt(e.target.closest('.card').dataset.taskId);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', taskId);
-    cardEl.classList.add('dragging');
+    e.target.closest('.card').classList.add('dragging');
 }
 
 function handleCardDragEnd(e) {
     e.stopPropagation();
-    const cardEl = e.target.closest('.card');
-    if (cardEl) cardEl.classList.remove('dragging');
+    e.target.closest('.card').classList.remove('dragging');
 }
 
 function handleCardDragOver(e) {
@@ -890,10 +830,8 @@ function getSpecsFromContainer(containerId) {
     const rows = container.querySelectorAll('.spec-row');
     const specs = [];
     rows.forEach(row => {
-        const keyInput = row.querySelector('.spec-key');
-        const valInput = row.querySelector('.spec-val');
-        const k = keyInput ? keyInput.value.trim() : '';
-        const v = valInput ? valInput.value.trim() : '';
+        const k = row.querySelector('.spec-key').value.trim();
+        const v = row.querySelector('.spec-val').value.trim();
         if (k || v) {
             specs.push({ key: k || 'Campo', value: v || '' });
         }
@@ -909,13 +847,15 @@ function openTaskModal() {
         container.innerHTML = '';
         addSpecField('taskSpecsContainer');
     }
-    const modal = document.getElementById('taskModal');
-    if (modal) modal.showModal();
+    document.getElementById('taskModal').showModal();
 }
 
 function closeTaskModal() {
-    const modal = document.getElementById('taskModal');
-    if (modal) modal.close();
+    document.getElementById('taskModal').close();
+}
+
+function closeBoardModal() {
+    document.getElementById('boardModal').close();
 }
 
 function openEditModal(taskId) {
@@ -923,15 +863,10 @@ function openEditModal(taskId) {
     if (!task) return;
 
     currentEditingTaskId = taskId;
-    const editTitle = document.getElementById('editTitle');
-    const editDesc = document.getElementById('editDescription');
-    const editPriority = document.getElementById('editPriority');
-    const editDueDate = document.getElementById('editDueDate');
-
-    if (editTitle) editTitle.value = task.title;
-    if (editDesc) editDesc.value = task.description || '';
-    if (editPriority) editPriority.value = task.priority;
-    if (editDueDate) editDueDate.value = task.dueDate || '';
+    document.getElementById('editTitle').value = task.title;
+    document.getElementById('editDescription').value = task.description || '';
+    document.getElementById('editPriority').value = task.priority;
+    document.getElementById('editDueDate').value = task.dueDate || '';
     
     const container = document.getElementById('editSpecsContainer');
     if (container) {
@@ -943,13 +878,11 @@ function openEditModal(taskId) {
         }
     }
 
-    const editModal = document.getElementById('editModal');
-    if (editModal) editModal.showModal();
+    document.getElementById('editModal').showModal();
 }
 
 function closeEditModal() {
-    const editModal = document.getElementById('editModal');
-    if (editModal) editModal.close();
+    document.getElementById('editModal').close();
     currentEditingTaskId = null;
 }
 
@@ -980,177 +913,124 @@ function escapeHtml(text) {
 }
 
 function closeSettingsModal() {
-    const modal = document.getElementById('settingsModal');
-    if (modal) modal.close();
+    document.getElementById('settingsModal').close();
 }
 
 function openSettingsModal() {
     const content = document.getElementById('boardSettingsContent');
     const isOwner = currentBoardData.owner_id === currentUser;
     
-    if (content) {
-        content.innerHTML = `
-            <div class="settings-info">
-                <h3>Información del Tablero</h3>
-                <p><strong>Título:</strong> ${escapeHtml(currentBoardData.title)}</p>
-                <p><strong>Descripción:</strong> ${escapeHtml(currentBoardData.description || 'Sin descripción')}</p>
-                <p><strong>Estado:</strong> ${isOwner ? 'Eres propietario' : 'Compartido contigo'}</p>
-                ${currentBoardData.shared_users && currentBoardData.shared_users.length > 0 ? `<p><strong>Compartido con:</strong> ${escapeHtml(currentBoardData.shared_users.join(', '))}</p>` : ''}
-            </div>
-        `;
-    }
+    content.innerHTML = `
+        <div class="settings-info">
+            <h3>Información del Tablero</h3>
+            <p><strong>Título:</strong> ${escapeHtml(currentBoardData.title)}</p>
+            <p><strong>Descripción:</strong> ${escapeHtml(currentBoardData.description || 'Sin descripción')}</p>
+            <p><strong>Estado:</strong> ${isOwner ? 'Eres propietario' : 'Compartido contigo'}</p>
+            ${currentBoardData.shared_users && currentBoardData.shared_users.length > 0 ? `<p><strong>Compartido con:</strong> ${currentBoardData.shared_users.join(', ')}</p>` : ''}
+        </div>
+    `;
     
-    const modal = document.getElementById('settingsModal');
-    if (modal) modal.showModal();
+    document.getElementById('settingsModal').showModal();
 }
 
 function attachMainEventListeners() {
-    const newTaskBtn = document.getElementById('newTaskBtn');
-    const boardsBtn = document.getElementById('boardsBtn');
-    const authBtn = document.getElementById('authBtn');
-    const logoutBtn = document.getElementById('logoutBtn');
-    const settingsBtn = document.getElementById('settingsBtn');
+    document.getElementById('newTaskBtn')?.addEventListener('click', openTaskModal);
+    document.getElementById('boardsBtn')?.addEventListener('click', openBoardSelector);
+    document.getElementById('authBtn')?.addEventListener('click', openAuthModal);
+    document.getElementById('logoutBtn')?.addEventListener('click', logout);
+    document.getElementById('settingsBtn')?.addEventListener('click', openSettingsModal);
 
-    if (newTaskBtn) newTaskBtn.addEventListener('click', openTaskModal);
-    if (boardsBtn) boardsBtn.addEventListener('click', openBoardSelector);
-    if (authBtn) authBtn.addEventListener('click', openAuthModal);
-    if (logoutBtn) logoutBtn.addEventListener('click', logout);
-    if (settingsBtn) settingsBtn.addEventListener('click', openSettingsModal);
+    document.getElementById('taskForm')?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const taskId = currentBoardData.nextId++;
+        const task = {
+            id: taskId,
+            title: document.getElementById('taskTitle').value,
+            description: document.getElementById('taskDescription').value,
+            priority: document.getElementById('taskPriority').value,
+            dueDate: document.getElementById('taskDueDate').value,
+            specs: getSpecsFromContainer('taskSpecsContainer'),
+            createdAt: new Date().toISOString()
+        };
 
-    const taskForm = document.getElementById('taskForm');
-    if (taskForm) {
-        taskForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const taskId = currentBoardData.nextId++;
-            const titleInput = document.getElementById('taskTitle');
-            const descInput = document.getElementById('taskDescription');
-            const priorityInput = document.getElementById('taskPriority');
-            const dueInput = document.getElementById('taskDueDate');
+        currentBoardData.tasks[taskId] = task;
+        const firstColId = currentBoardData.columnList[0]?.id || 'todo';
+        if (!currentBoardData.columns[firstColId]) currentBoardData.columns[firstColId] = [];
+        currentBoardData.columns[firstColId].push(taskId);
 
-            const task = {
-                id: taskId,
-                title: titleInput ? titleInput.value : '',
-                description: descInput ? descInput.value : '',
-                priority: priorityInput ? priorityInput.value : 'medium',
-                dueDate: dueInput ? dueInput.value : '',
-                specs: getSpecsFromContainer('taskSpecsContainer'),
-                createdAt: new Date().toISOString()
-            };
+        saveCurrentBoard();
+        renderBoard();
+        closeTaskModal();
+    });
 
-            currentBoardData.tasks[taskId] = task;
-            const firstColId = currentBoardData.columnList[0]?.id || 'todo';
-            if (!currentBoardData.columns[firstColId]) currentBoardData.columns[firstColId] = [];
-            currentBoardData.columns[firstColId].push(taskId);
+    document.getElementById('editForm')?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (currentEditingTaskId === null) return;
 
-            saveCurrentBoard();
-            renderBoard();
-            closeTaskModal();
+        const task = currentBoardData.tasks[currentEditingTaskId];
+        task.title = document.getElementById('editTitle').value;
+        task.description = document.getElementById('editDescription').value;
+        task.priority = document.getElementById('editPriority').value;
+        task.dueDate = document.getElementById('editDueDate').value;
+        task.specs = getSpecsFromContainer('editSpecsContainer');
+
+        saveCurrentBoard();
+        renderBoard();
+        closeEditModal();
+    });
+
+    document.getElementById('boardForm')?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const title = document.getElementById('boardTitle').value;
+        const description = document.getElementById('boardDescription').value;
+
+        if (!title.trim()) {
+            alert('El título no puede estar vacío');
+            return;
+        }
+
+        const newBoard = {
+            id: Date.now(),
+            title: title.trim(),
+            description: description,
+            tasks: {},
+            nextId: 1,
+            columnList: DEFAULT_COLUMNS.map(c => ({ ...c })),
+            columns: {},
+            owner_id: currentUser,
+            shared_users: [],
+            created_at: new Date().toISOString()
+        };
+
+        DEFAULT_COLUMNS.forEach(col => {
+            newBoard.columns[col.id] = [];
         });
-    }
 
-    const editForm = document.getElementById('editForm');
-    if (editForm) {
-        editForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            if (currentEditingTaskId === null) return;
+        boards.push(newBoard);
+        saveLocalBoards();
+        closeBoardModal();
+        renderBoardList();
+        alert('Tablero creado');
+    });
 
-            const task = currentBoardData.tasks[currentEditingTaskId];
-            const editTitle = document.getElementById('editTitle');
-            const editDesc = document.getElementById('editDescription');
-            const editPriority = document.getElementById('editPriority');
-            const editDue = document.getElementById('editDueDate');
+    document.getElementById('boardSettingsForm')?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        saveBoardSettings();
+    });
 
-            if (task) {
-                task.title = editTitle ? editTitle.value : task.title;
-                task.description = editDesc ? editDesc.value : task.description;
-                task.priority = editPriority ? editPriority.value : task.priority;
-                task.dueDate = editDue ? editDue.value : task.dueDate;
-                task.specs = getSpecsFromContainer('editSpecsContainer');
-            }
+    document.getElementById('searchInput')?.addEventListener('input', (e) => {
+        searchQuery = e.target.value;
+        renderBoard();
+    });
 
-            saveCurrentBoard();
-            renderBoard();
-            closeEditModal();
-        });
-    }
-
-    const boardForm = document.getElementById('boardForm');
-    if (boardForm) {
-        boardForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const titleInput = document.getElementById('boardTitle');
-            const descInput = document.getElementById('boardDescription');
-            const boardModal = document.getElementById('boardModal');
-
-            const title = titleInput ? titleInput.value : '';
-            const description = descInput ? descInput.value : '';
-            const editBoardId = boardModal ? boardModal.dataset.editBoardId : '';
-
-            if (editBoardId) {
-                const board = boards.find(b => b.id === parseInt(editBoardId));
-                if (board) {
-                    board.title = title;
-                    board.description = description;
-                    if (board.id === currentBoardId) {
-                        currentBoardData = JSON.parse(JSON.stringify(board));
-                        const boardNameEl = document.getElementById('current-board-name');
-                        if (boardNameEl) boardNameEl.textContent = `/ ${title}`;
-                    }
-                }
-            } else {
-                const newBoard = {
-                    id: Date.now(),
-                    title: title,
-                    description: description,
-                    tasks: {},
-                    nextId: 1,
-                    columnList: DEFAULT_COLUMNS.map(c => ({ ...c })),
-                    columns: {},
-                    owner_id: currentUser,
-                    shared_users: [],
-                    created_at: new Date().toISOString()
-                };
-
-                DEFAULT_COLUMNS.forEach(col => {
-                    newBoard.columns[col.id] = [];
-                });
-
-                boards.push(newBoard);
-            }
-
-            saveLocalBoards();
-            closeBoardModal();
-            renderBoardList();
-        });
-    }
-
-    const boardSettingsForm = document.getElementById('boardSettingsForm');
-    if (boardSettingsForm) {
-        boardSettingsForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            saveBoardSettings();
-        });
-    }
-
-    const searchInput = document.getElementById('searchInput');
-    if (searchInput) {
-        searchInput.addEventListener('input', (e) => {
-            searchQuery = e.target.value;
-            renderBoard();
-        });
-    }
-
-    const themeToggle = document.getElementById('themeToggle');
-    if (themeToggle) {
-        themeToggle.addEventListener('click', () => {
-            const html = document.documentElement;
-            const currentTheme = html.getAttribute('data-theme') || 'light';
-            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-            html.setAttribute('data-theme', newTheme);
-            localStorage.setItem('kanban_theme_v2', newTheme);
-            themeToggle.textContent = newTheme === 'dark' ? '☀️' : '🌙';
-        });
-    }
+    document.getElementById('themeToggle')?.addEventListener('click', () => {
+        const html = document.documentElement;
+        const currentTheme = html.getAttribute('data-theme') || 'light';
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', newTheme);
+        localStorage.setItem('kanban_theme_v2', newTheme);
+        document.getElementById('themeToggle').textContent = newTheme === 'dark' ? '☀️' : '🌙';
+    });
 
     document.addEventListener('dragover', (e) => {
         if (e.target.closest('.cards-container')) {
