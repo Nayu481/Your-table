@@ -44,7 +44,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 # ========== AUTENTICACIÓN ==========
 
-@app.post("/api/register", response_model=UserResponse)
+@app.post("/register", response_model=UserResponse)
 def register(user: UserCreate, db: Session = Depends(get_db)):
     """Registra un nuevo usuario"""
     try:
@@ -77,7 +77,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
         print(f"Error en registro: {e}")
         raise HTTPException(status_code=500, detail="Error al registrar usuario")
 
-@app.post("/api/login", response_model=UserResponse)
+@app.post("/login", response_model=UserResponse)
 def login(user: UserCreate, db: Session = Depends(get_db)):
     """Inicia sesión con username y contraseña"""
     try:
