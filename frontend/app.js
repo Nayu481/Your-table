@@ -1,4 +1,4 @@
-const API_URL = 'http://127.0.0.1:8000/api';
+const API_URL = 'https://your-table.onrender.com';
 const STORAGE_KEY_BOARDS = 'kanban_boards_v2';
 const STORAGE_KEY_CURRENT = 'kanban_current_board_v2';
 
