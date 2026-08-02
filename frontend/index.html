@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your Table - Gestor de Tareas</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- MODAL DE AUTENTICACIÓN -->
+    <dialog id="authModal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeAuthModal()">✕</button>
+            <h2 class="modal-header" id="authTitle">Iniciar Sesión</h2>
+            
+            <form id="auth-form" class="auth-form">
+                <div class="form-group">
+                    <label class="form-label">Usuario</label>
+                    <input 
+                        type="text" 
+                        class="form-input" 
+                        id="auth-username" 
+                        placeholder="Tu nombre de usuario"
+                        required
+                        minlength="3"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Contraseña</label>
+                    <input 
+                        type="password" 
+                        class="form-input" 
+                        id="auth-password" 
+                        placeholder="Contraseña segura"
+                        required
+                        minlength="4"
+                    >
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-block" id="auth-submit-btn">
+                    Entrar
+                </button>
+            </form>
+
+            <div class="auth-toggle">
+                <span id="auth-toggle-text">¿No tienes cuenta?</span>
+                <button type="button" class="btn-link" id="auth-toggle-btn">Regístrate</button>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- MODAL DE SELECTOR DE TABLEROS -->
+    <dialog id="boardSelectorModal" class="modal modal-wide">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeBoardSelector()">✕</button>
+            <h2 class="modal-header">Mis Tableros</h2>
+            
+            <div class="invitations-alert">
+                <button class="btn btn-secondary" id="invitationsBtn" onclick="openInvitationsModal()" style="display:none;">
+                    📬 Ver Invitaciones (<span id="invitationsCount">0</span>)
+                </button>
+            </div>
+            
+            <div class="board-selector-container">
+                <div id="boardList" class="board-list"></div>
+            </div>
+
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeBoardSelector()">Cancelar</button>
+                <button class="btn btn-primary" onclick="createNewBoard()">➕ Nuevo Tablero</button>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- MODAL CREAR/EDITAR TABLERO -->
+    <dialog id="boardModal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeBoardModal()">✕</button>
+            <h2 class="modal-header" id="boardModalTitle">Crear Tablero</h2>
+            
+            <form id="boardForm">
+                <div class="form-group">
+                    <label class="form-label">Nombre del tablero *</label>
+                    <input type="text" class="form-input" id="boardTitle" placeholder="Mi proyecto" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Descripción</label>
+                    <textarea class="form-textarea" id="boardDescription" placeholder="Descripción del tablero..."></textarea>
+                </div>
+
+                <div id="shareSection" class="form-group" style="display:none;">
+                    <label class="form-label">Compartir con</label>
+                    <div class="share-input-group">
+                        <input type="text" class="form-input" id="shareUsername" placeholder="Nombre de usuario">
+                        <button type="button" class="btn btn-secondary" onclick="addShareUser()">Añadir</button>
+                    </div>
+                    <div id="sharedUsersList" class="shared-users-list"></div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeBoardModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </dialog>
+
+    <!-- APLICACIÓN PRINCIPAL -->
+    <div id="app-container">
+        <header>
+            <div class="header-title">
+                <span>📋 Your Table</span>
+                <span id="current-board-name"></span>
+                <span id="logged-user-display" class="user-display"></span>
+            </div>
+            <div class="header-controls">
+                <input 
+                    type="text" 
+                    class="search-box" 
+                    id="searchInput" 
+                    placeholder="Filtrar tareas..."
+                >
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-secondary btn-icon" id="themeToggle" title="Cambiar tema">
+                    🌙
+                </button>
+                <button class="btn btn-secondary" id="boardsBtn" title="Mis tableros">
+                    📋 Tableros
+                </button>
+                <button class="btn btn-primary" id="newTaskBtn">
+                    ➕ Nueva Tarea
+                </button>
+                <button class="btn btn-secondary" id="authBtn">
+                    🔓 Conectar
+                </button>
+                <button class="btn btn-secondary" id="logoutBtn" style="display:none;">
+                    Salir
+                </button>
+                <button class="btn btn-secondary btn-icon" id="settingsBtn" title="Opciones">
+                    ⚙️
+                </button>
+            </div>
+        </header>
+
+        <main class="board">
+            <div class="columns-container" id="boardColumns"></div>
+        </main>
+    </div>
+
+    <!-- MODAL OPCIONES TABLERO -->
+    <dialog id="settingsModal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeSettingsModal()">✕</button>
+            <h2 class="modal-header">Opciones del Tablero</h2>
+            
+            <div id="boardSettingsContent"></div>
+
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeSettingsModal()">Cerrar</button>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- Modal Nueva Tarea -->
+    <dialog id="taskModal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeTaskModal()">✕</button>
+            <h2 class="modal-header">Crear Tarea</h2>
+            <form id="taskForm">
+                <div class="form-group">
+                    <label class="form-label">Título *</label>
+                    <input type="text" class="form-input" id="taskTitle" placeholder="¿Qué hay que hacer?" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Descripción</label>
+                    <textarea class="form-textarea" id="taskDescription" placeholder="Detalles..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Prioridad</label>
+                    <select class="form-select" id="taskPriority">
+                        <option value="low">Baja</option>
+                        <option value="medium" selected>Media</option>
+                        <option value="high">Alta</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Fecha límite</label>
+                    <input type="date" class="form-input" id="taskDueDate">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Especificaciones / Valores a medida</label>
+                    <div id="taskSpecsContainer" class="specs-container"></div>
+                    <button type="button" class="btn btn-secondary btn-small" onclick="addSpecField('taskSpecsContainer')">➕ Añadir campo</button>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeTaskModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </dialog>
+
+    <!-- Modal Editar Tarea -->
+    <dialog id="editModal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeEditModal()">✕</button>
+            <h2 class="modal-header">Editar Tarea</h2>
+            <form id="editForm">
+                <input type="hidden" id="editTaskId">
+                <div class="form-group">
+                    <label class="form-label">Título *</label>
+                    <input type="text" class="form-input" id="editTitle" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Descripción</label>
+                    <textarea class="form-textarea" id="editDescription"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Prioridad</label>
+                    <select class="form-select" id="editPriority">
+                        <option value="low">Baja</option>
+                        <option value="medium">Media</option>
+                        <option value="high">Alta</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Fecha límite</label>
+                    <input type="date" class="form-input" id="editDueDate">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Especificaciones / Valores a medida</label>
+                    <div id="editSpecsContainer" class="specs-container"></div>
+                    <button type="button" class="btn btn-secondary btn-small" onclick="addSpecField('editSpecsContainer')">➕ Añadir campo</button>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeEditModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Actualizar</button>
+                </div>
+            </form>
+        </div>
+    </dialog>
+
+    <script src="app.js"></script>
+</body>
+</html>
+
+    <!-- Modal Invitaciones de Tableros -->
+    <dialog id="invitationsModal" class="modal modal-wide">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeInvitationsModal()">✕</button>
+            <h2 class="modal-header">Invitaciones de Tableros</h2>
+            
+            <div id="invitationsList" class="invitations-list"></div>
+
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeInvitationsModal()">Cerrar</button>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- Modal Configuración del Tablero -->
+    <dialog id="boardSettingsModal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeBoardSettings()">✕</button>
+            <h2 class="modal-header">Configuración del Tablero</h2>
+            
+            <form id="boardSettingsForm">
+                <div class="form-group">
+                    <label class="form-label">Nombre del tablero *</label>
+                    <input type="text" class="form-input" id="boardSettingsTitle" placeholder="Mi proyecto" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Descripción</label>
+                    <textarea class="form-textarea" id="boardSettingsDescription" placeholder="Descripción del tablero..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Compartir con otros usuarios</label>
+                    <div class="share-input-group">
+                        <input type="text" class="form-input" id="shareUsernameInput" placeholder="Nombre de usuario">
+                        <button type="button" class="btn btn-secondary" onclick="addBoardShareUser(parseInt(document.getElementById('boardSettingsForm').dataset.boardId))">Añadir</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Usuarios con acceso:</label>
+                    <div id="currentSharedUsers"></div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeBoardSettings()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </dialog>
+
+</body>
+</html>
+
+    <!-- Modal Invitaciones -->
+    <dialog id="invitationsModal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeInvitationsModal()">✕</button>
+            <h2 class="modal-header">Invitaciones de Tableros</h2>
+            
+            <div id="invitationsList" class="invitations-list"></div>
+
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeInvitationsModal()">Cerrar</button>
+            </div>
+        </div>
+    </dialog>
+
+</body>
+</html>
