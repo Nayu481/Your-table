@@ -256,7 +256,10 @@ function loadInvitations() {
 
     fetch(`${API_URL}/invitations`, {
         method: 'GET',
-        headers: { 'X-User-Id': currentUser }
+        headers: { 
+            'Content-Type': 'application/json',
+            'X-User-Id': String(currentUser)
+        }
     })
     .then(res => res.json())
     .then(data => {
@@ -302,7 +305,10 @@ function renderInvitations(invitations) {
 function acceptInvitation(invitationId) {
     fetch(`${API_URL}/invitations/${invitationId}/accept`, {
         method: 'POST',
-        headers: { 'X-User-Id': currentUser }
+        headers: { 
+            'Content-Type': 'application/json',
+            'X-User-Id': String(currentUser)
+        }
     })
     .then(res => res.json())
     .then(data => {
@@ -320,7 +326,10 @@ function rejectInvitation(invitationId) {
     
     fetch(`${API_URL}/invitations/${invitationId}/reject`, {
         method: 'POST',
-        headers: { 'X-User-Id': currentUser }
+        headers: { 
+            'Content-Type': 'application/json',
+            'X-User-Id': String(currentUser)
+        }
     })
     .then(res => res.json())
     .then(data => {
@@ -448,10 +457,23 @@ function addBoardShareUser(boardId) {
         return;
     }
 
-    // ✅ RUTA ARREGLADA - Sin duplicar /api
-    fetch(`${API_URL}/user/${username}/exists`)
-        .then(res => res.json())
+    console.log('Verificando usuario:', username);
+    console.log('URL:', `${API_URL}/user/${username}/exists`);
+
+    // ✅ RUTA ARREGLADA - Con headers consistentes
+    fetch(`${API_URL}/user/${username}/exists`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-User-Id': String(currentUser)
+        }
+    })
+        .then(res => {
+            console.log('Respuesta verificar usuario:', res.status);
+            return res.json();
+        })
         .then(data => {
+            console.log('Datos verificar usuario:', data);
             if (!data.exists) {
                 alert('El usuario no existe');
                 return;
@@ -462,16 +484,21 @@ function addBoardShareUser(boardId) {
                 return;
             }
 
-            // ✅ RUTA ARREGLADA - Sin duplicar /api
+            console.log('Enviando invitación a:', username);
+            // ✅ RUTA ARREGLADA - Con headers consistentes
             fetch(`${API_URL}/boards/${boardId}/share?username=${encodeURIComponent(username)}`, {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
-                    'X-User-Id': currentUser
+                    'X-User-Id': String(currentUser)
                 }
             })
-            .then(res => res.json())
+            .then(res => {
+                console.log('Respuesta compartir:', res.status);
+                return res.json();
+            })
             .then(data => {
+                console.log('Datos compartir:', data);
                 if (data.ok || data.message) {
                     if (board.shared_users && board.shared_users.includes(username)) {
                         alert('Este usuario ya tiene acceso');
@@ -489,12 +516,12 @@ function addBoardShareUser(boardId) {
             })
             .catch(err => {
                 console.error('Error en compartir:', err);
-                alert('Error al compartir el tablero');
+                alert('Error al compartir el tablero: ' + err.message);
             });
         })
         .catch(err => {
             console.error('Error verificando usuario:', err);
-            alert('Error al verificar usuario');
+            alert('Error al verificar usuario: ' + err.message);
         });
 }
 
