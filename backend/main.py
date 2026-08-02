@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import bcrypt
 from datetime import datetime
+from typing import Optional, Union
 
 from models import DBUser, DBBoard, DBTask, DBInvitation, Base
 from schemas import UserCreate, UserResponse, BoardCreate, BoardResponse, TaskCreate, TaskResponse, InvitationResponse
@@ -41,6 +42,32 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     except Exception as e:
         print(f"Error verificando contraseña: {e}")
         return False
+
+# ========== DEPENDENCIA FLEXIBLE PARA AUTENTICACIÓN POR CABECERA ==========
+def get_current_user_flexible(x_user_id: Optional[Union[int, str]] = Header(None), db: Session = Depends(get_db)) -> DBUser:
+    """
+    Acepta tanto si el frontend envía el ID (ej: '1') 
+    como si envía el nombre de usuario (ej: 'juanperez') en la cabecera X-User-Id.
+    """
+    if x_user_id is None:
+        raise HTTPException(status_code=401, detail="No se proporcionó identificación de usuario (X-User-Id)")
+    
+    db_user = None
+    # Si viene como número o string numérico
+    try:
+        user_id = int(x_user_id)
+        db_user = db.query(DBUser).filter(DBUser.id == user_id).first()
+    except ValueError:
+        pass
+    
+    # Si no se encontró por ID o vino como nombre de usuario de texto
+    if not db_user:
+        db_user = db.query(DBUser).filter(DBUser.username == str(x_user_id)).first()
+        
+    if not db_user:
+        raise HTTPException(status_code=401, detail="Usuario no autenticado o no encontrado")
+        
+    return db_user
 
 # ========== AUTENTICACIÓN ==========
 
@@ -105,17 +132,13 @@ def health_check():
 # ========== TABLEROS ==========
 
 @app.post("/api/boards", response_model=BoardResponse)
-def create_board(board: BoardCreate, x_user_id: int = Header(...), db: Session = Depends(get_db)):
+def create_board(board: BoardCreate, current_user: DBUser = Depends(get_current_user_flexible), db: Session = Depends(get_db)):
     """Crea un nuevo tablero"""
     try:
-        db_user = db.query(DBUser).filter(DBUser.id == x_user_id).first()
-        if not db_user:
-            raise HTTPException(status_code=401, detail="Usuario no autenticado")
-        
         new_board = DBBoard(
             title=board.title,
             description=board.description,
-            owner_id=x_user_id
+            owner_id=current_user.id
         )
         db.add(new_board)
         db.commit()
@@ -130,15 +153,11 @@ def create_board(board: BoardCreate, x_user_id: int = Header(...), db: Session =
         raise HTTPException(status_code=500, detail="Error al crear tablero")
 
 @app.get("/api/boards")
-def get_boards(x_user_id: int = Header(...), db: Session = Depends(get_db)):
+def get_boards(current_user: DBUser = Depends(get_current_user_flexible), db: Session = Depends(get_db)):
     """Obtiene tableros del usuario (propios y compartidos)"""
     try:
-        db_user = db.query(DBUser).filter(DBUser.id == x_user_id).first()
-        if not db_user:
-            raise HTTPException(status_code=401, detail="Usuario no autenticado")
-        
-        owned = db.query(DBBoard).filter(DBBoard.owner_id == x_user_id).all()
-        shared = db.query(DBBoard).filter(DBBoard.shared_users.any(DBUser.id == x_user_id)).all()
+        owned = db.query(DBBoard).filter(DBBoard.owner_id == current_user.id).all()
+        shared = db.query(DBBoard).filter(DBBoard.shared_users.any(DBUser.id == current_user.id)).all()
         
         return {
             "owned": [BoardResponse.from_orm(b).dict() for b in owned],
@@ -152,12 +171,12 @@ def get_boards(x_user_id: int = Header(...), db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Error al obtener tableros")
 
 @app.put("/api/boards/{board_id}")
-def update_board(board_id: int, board: BoardCreate, x_user_id: int = Header(...), db: Session = Depends(get_db)):
+def update_board(board_id: int, board: BoardCreate, current_user: DBUser = Depends(get_current_user_flexible), db: Session = Depends(get_db)):
     """Actualiza un tablero"""
     try:
         db_board = db.query(DBBoard).filter(
             DBBoard.id == board_id,
-            DBBoard.owner_id == x_user_id
+            DBBoard.owner_id == current_user.id
         ).first()
         
         if not db_board:
@@ -178,12 +197,12 @@ def update_board(board_id: int, board: BoardCreate, x_user_id: int = Header(...)
         raise HTTPException(status_code=500, detail="Error al actualizar tablero")
 
 @app.post("/api/boards/{board_id}/share")
-def share_board(board_id: int, username: str, x_user_id: int = Header(...), db: Session = Depends(get_db)):
+def share_board(board_id: int, username: str, current_user: DBUser = Depends(get_current_user_flexible), db: Session = Depends(get_db)):
     """Comparte un tablero con otro usuario (envía invitación)"""
     try:
         db_board = db.query(DBBoard).filter(
             DBBoard.id == board_id,
-            DBBoard.owner_id == x_user_id
+            DBBoard.owner_id == current_user.id
         ).first()
         
         if not db_board:
@@ -193,7 +212,7 @@ def share_board(board_id: int, username: str, x_user_id: int = Header(...), db: 
         if not target_user:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
         
-        if target_user.id == x_user_id:
+        if target_user.id == current_user.id:
             raise HTTPException(status_code=400, detail="No puedes compartir contigo mismo")
         
         # Verificar si ya existe una invitación pendiente
@@ -227,15 +246,11 @@ def share_board(board_id: int, username: str, x_user_id: int = Header(...), db: 
 # ========== INVITACIONES ==========
 
 @app.get("/api/invitations")
-def get_invitations(x_user_id: int = Header(...), db: Session = Depends(get_db)):
+def get_invitations(current_user: DBUser = Depends(get_current_user_flexible), db: Session = Depends(get_db)):
     """Obtiene invitaciones pendientes del usuario"""
     try:
-        db_user = db.query(DBUser).filter(DBUser.id == x_user_id).first()
-        if not db_user:
-            raise HTTPException(status_code=401, detail="Usuario no autenticado")
-        
         invitations = db.query(DBInvitation).filter(
-            DBInvitation.user_id == x_user_id,
+            DBInvitation.user_id == current_user.id,
             DBInvitation.status == "pending"
         ).all()
         
@@ -259,12 +274,12 @@ def get_invitations(x_user_id: int = Header(...), db: Session = Depends(get_db))
         raise HTTPException(status_code=500, detail="Error al obtener invitaciones")
 
 @app.post("/api/invitations/{invitation_id}/accept")
-def accept_invitation(invitation_id: int, x_user_id: int = Header(...), db: Session = Depends(get_db)):
+def accept_invitation(invitation_id: int, current_user: DBUser = Depends(get_current_user_flexible), db: Session = Depends(get_db)):
     """Acepta una invitación de compartir tablero"""
     try:
         invitation = db.query(DBInvitation).filter(
             DBInvitation.id == invitation_id,
-            DBInvitation.user_id == x_user_id
+            DBInvitation.user_id == current_user.id
         ).first()
         
         if not invitation:
@@ -288,12 +303,12 @@ def accept_invitation(invitation_id: int, x_user_id: int = Header(...), db: Sess
         raise HTTPException(status_code=500, detail="Error al aceptar invitación")
 
 @app.post("/api/invitations/{invitation_id}/reject")
-def reject_invitation(invitation_id: int, x_user_id: int = Header(...), db: Session = Depends(get_db)):
+def reject_invitation(invitation_id: int, current_user: DBUser = Depends(get_current_user_flexible), db: Session = Depends(get_db)):
     """Rechaza una invitación de compartir tablero"""
     try:
         invitation = db.query(DBInvitation).filter(
             DBInvitation.id == invitation_id,
-            DBInvitation.user_id == x_user_id
+            DBInvitation.user_id == current_user.id
         ).first()
         
         if not invitation:
@@ -315,12 +330,12 @@ def reject_invitation(invitation_id: int, x_user_id: int = Header(...), db: Sess
         raise HTTPException(status_code=500, detail="Error al rechazar invitación")
 
 @app.delete("/api/boards/{board_id}")
-def delete_board(board_id: int, x_user_id: int = Header(...), db: Session = Depends(get_db)):
+def delete_board(board_id: int, current_user: DBUser = Depends(get_current_user_flexible), db: Session = Depends(get_db)):
     """Elimina un tablero"""
     try:
         board = db.query(DBBoard).filter(
             DBBoard.id == board_id,
-            DBBoard.owner_id == x_user_id
+            DBBoard.owner_id == current_user.id
         ).first()
         
         if not board:
