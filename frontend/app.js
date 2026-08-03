@@ -1016,28 +1016,79 @@ function attachMainEventListeners() {
             return;
         }
 
-        const newBoard = {
-            id: Date.now(),
-            title: title.trim(),
-            description: description,
-            tasks: {},
-            nextId: 1,
-            columnList: DEFAULT_COLUMNS.map(c => ({ ...c })),
-            columns: {},
-            owner_id: currentUser,
-            shared_users: [],
-            created_at: new Date().toISOString()
-        };
+        // Si estamos logueados, guardar en backend
+        if (currentUser) {
+            fetch(`${API_URL}/boards`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-User-Id': String(currentUser)
+                },
+                body: JSON.stringify({
+                    title: title.trim(),
+                    description: description
+                })
+            })
+            .then(res => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json();
+            })
+            .then(data => {
+                console.log('Tablero creado en backend:', data);
+                
+                // Crear objeto local con ID del backend
+                const newBoard = {
+                    id: data.id,  // ✅ ID del backend, no timestamp
+                    title: data.title,
+                    description: data.description,
+                    owner_id: data.owner_id,
+                    tasks: {},
+                    nextId: 1,
+                    columnList: DEFAULT_COLUMNS.map(c => ({ ...c })),
+                    columns: {},
+                    shared_users: [],
+                    created_at: data.created_at
+                };
 
-        DEFAULT_COLUMNS.forEach(col => {
-            newBoard.columns[col.id] = [];
-        });
+                DEFAULT_COLUMNS.forEach(col => {
+                    newBoard.columns[col.id] = [];
+                });
 
-        boards.push(newBoard);
-        saveLocalBoards();
-        closeBoardModal();
-        renderBoardList();
-        alert('Tablero creado');
+                boards.push(newBoard);
+                saveLocalBoards();
+                closeBoardModal();
+                renderBoardList();
+                alert('Tablero creado');
+            })
+            .catch(err => {
+                console.error('Error creando tablero:', err);
+                alert('Error al crear tablero en servidor');
+            });
+        } else {
+            // Sin login: solo localStorage
+            const newBoard = {
+                id: Date.now(),
+                title: title.trim(),
+                description: description,
+                tasks: {},
+                nextId: 1,
+                columnList: DEFAULT_COLUMNS.map(c => ({ ...c })),
+                columns: {},
+                owner_id: null,
+                shared_users: [],
+                created_at: new Date().toISOString()
+            };
+
+            DEFAULT_COLUMNS.forEach(col => {
+                newBoard.columns[col.id] = [];
+            });
+
+            boards.push(newBoard);
+            saveLocalBoards();
+            closeBoardModal();
+            renderBoardList();
+            alert('Tablero creado localmente');
+        }
     });
 
     document.getElementById('boardSettingsForm')?.addEventListener('submit', (e) => {
