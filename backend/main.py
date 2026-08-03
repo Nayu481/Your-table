@@ -42,8 +42,6 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         print(f"Error verificando contraseña: {e}")
         return False
 
-# ========== AUTENTICACIÓN ==========
-
 @app.post("/api/register", response_model=UserResponse)
 def register(user: UserCreate, db: Session = Depends(get_db)):
     """Registra un nuevo usuario"""
@@ -102,12 +100,12 @@ def health_check():
     """Endpoint de salud"""
     return {"status": "ok", "message": "Your Table API funcionando"}
 
-# ========== TABLEROS ==========
-
 @app.post("/api/boards", response_model=BoardResponse)
 def create_board(board: BoardCreate, x_user_id: int = Header(...), db: Session = Depends(get_db)):
     """Crea un nuevo tablero"""
     try:
+        x_user_id = int(x_user_id)
+        
         db_user = db.query(DBUser).filter(DBUser.id == x_user_id).first()
         if not db_user:
             raise HTTPException(status_code=401, detail="Usuario no autenticado")
@@ -120,6 +118,8 @@ def create_board(board: BoardCreate, x_user_id: int = Header(...), db: Session =
         db.add(new_board)
         db.commit()
         db.refresh(new_board)
+        
+        print(f"✓ Tablero creado: id={new_board.id}, owner={x_user_id}, title={new_board.title}")
         return BoardResponse.from_orm(new_board)
     
     except HTTPException:
@@ -133,6 +133,8 @@ def create_board(board: BoardCreate, x_user_id: int = Header(...), db: Session =
 def get_boards(x_user_id: int = Header(...), db: Session = Depends(get_db)):
     """Obtiene tableros del usuario (propios y compartidos)"""
     try:
+        x_user_id = int(x_user_id)
+        
         db_user = db.query(DBUser).filter(DBUser.id == x_user_id).first()
         if not db_user:
             raise HTTPException(status_code=401, detail="Usuario no autenticado")
@@ -151,127 +153,97 @@ def get_boards(x_user_id: int = Header(...), db: Session = Depends(get_db)):
         print(f"Error obteniendo tableros: {e}")
         raise HTTPException(status_code=500, detail="Error al obtener tableros")
 
-@app.put("/api/boards/{board_id}")
-def update_board(board_id: int, board: BoardCreate, x_user_id: int = Header(...), db: Session = Depends(get_db)):
-    """Actualiza un tablero"""
-    try:
-        db_board = db.query(DBBoard).filter(
-            DBBoard.id == board_id,
-            DBBoard.owner_id == x_user_id
-        ).first()
-        
-        if not db_board:
-            raise HTTPException(status_code=404, detail="Tablero no encontrado")
-        
-        db_board.title = board.title
-        db_board.description = board.description
-        db.commit()
-        db.refresh(db_board)
-        
-        return BoardResponse.from_orm(db_board)
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        print(f"Error actualizando tablero: {e}")
-        raise HTTPException(status_code=500, detail="Error al actualizar tablero")
-
 @app.post("/api/boards/{board_id}/share")
 def share_board(board_id: int, username: str, x_user_id: int = Header(...), db: Session = Depends(get_db)):
     """Comparte un tablero con otro usuario (envía invitación)"""
     try:
-        print(f"\n=== SHARE_BOARD ===")
-        print(f"board_id recibido: {board_id} (tipo: {type(board_id).__name__})")
-        print(f"username recibido: {username} (tipo: {type(username).__name__})")
-        print(f"x_user_id recibido: {x_user_id} (tipo: {type(x_user_id).__name__})")
+        print(f"\n{'='*70}")
+        print(f"SHARE_BOARD INICIO")
+        print(f"board_id: {board_id}, username: {username}, x_user_id: {x_user_id}")
         
-        # Convertir board_id a entero por seguridad
-        try:
-            board_id = int(board_id)
-            x_user_id = int(x_user_id)
-            print(f"Conversión exitosa: board_id={board_id}, x_user_id={x_user_id}")
-        except (ValueError, TypeError) as e:
-            print(f"Error en conversión: {e}")
-            raise HTTPException(status_code=400, detail="ID de tablero inválido")
+        board_id = int(board_id)
+        x_user_id = int(x_user_id)
+        print(f"Tipos convertidos correctamente")
         
-        print(f"Buscando tablero: id={board_id}, owner_id={x_user_id}")
+        print(f"\n[1] Buscando tablero {board_id} del propietario {x_user_id}...")
         db_board = db.query(DBBoard).filter(
             DBBoard.id == board_id,
             DBBoard.owner_id == x_user_id
         ).first()
-        print(f"Tablero encontrado: {db_board is not None}")
         
         if not db_board:
-            print(f"Tablero no encontrado o sin permisos")
-            raise HTTPException(status_code=404, detail="Tablero no encontrado o sin permisos")
+            print(f"✗ Tablero no encontrado")
+            # Debug
+            all_boards = db.query(DBBoard).all()
+            owner_boards = db.query(DBBoard).filter(DBBoard.owner_id == x_user_id).all()
+            print(f"  Tableros totales en BD: {len(all_boards)}")
+            print(f"  Tableros del propietario {x_user_id}: {len(owner_boards)}")
+            if owner_boards:
+                print(f"  IDs de tableros del propietario: {[b.id for b in owner_boards]}")
+            raise HTTPException(status_code=404, detail=f"Tablero {board_id} no encontrado")
         
-        print(f"Buscando usuario: {username}")
+        print(f"✓ Tablero encontrado: {db_board.title}")
+        
+        print(f"\n[2] Buscando usuario destino: {username}...")
         target_user = db.query(DBUser).filter(DBUser.username == username).first()
-        print(f"Usuario encontrado: {target_user is not None}")
         
         if not target_user:
-            print(f"Usuario {username} no encontrado en BD")
+            print(f"✗ Usuario {username} no encontrado")
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
         
-        print(f"Verificando: target_user.id={target_user.id}, x_user_id={x_user_id}")
+        print(f"✓ Usuario encontrado: {target_user.username} (id={target_user.id})")
+        
         if target_user.id == x_user_id:
-            print(f"Intento de compartir consigo mismo")
+            print(f"✗ Error: Mismo usuario")
             raise HTTPException(status_code=400, detail="No puedes compartir contigo mismo")
         
-        # Verificar si ya existe una invitación pendiente
-        print(f"Buscando invitaciones pendientes: board_id={board_id}, user_id={target_user.id}")
+        print(f"\n[3] Verificando invitaciones previas...")
         existing_invite = db.query(DBInvitation).filter(
             DBInvitation.board_id == board_id,
             DBInvitation.user_id == target_user.id,
             DBInvitation.status == "pending"
         ).first()
-        print(f"Invitación pendiente existente: {existing_invite is not None}")
         
         if existing_invite:
-            print(f"Ya hay invitación pendiente")
+            print(f"✗ Ya hay invitación pendiente")
             raise HTTPException(status_code=400, detail="Ya hay una invitación pendiente")
         
-        # Verificar si ya está compartido
-        print(f"Verificando si ya está compartido...")
-        print(f"db_board.shared_users: {db_board.shared_users}")
-        print(f"target_user: {target_user}")
-        
         if target_user in db_board.shared_users:
-            print(f"Usuario ya tiene acceso")
+            print(f"✗ Usuario ya tiene acceso")
             raise HTTPException(status_code=400, detail="Ya tiene acceso a este tablero")
         
-        # Crear invitación
-        print(f"Creando invitación...")
-        invitation = DBInvitation(board_id=board_id, user_id=target_user.id)
+        print(f"\n[4] Creando invitación...")
+        invitation = DBInvitation(
+            board_id=board_id,
+            user_id=target_user.id,
+            status="pending"
+        )
         db.add(invitation)
         db.commit()
         db.refresh(invitation)
         
-        print(f"Invitación creada: id={invitation.id}, board={board_id}, user={target_user.id}")
-        print(f"=== SHARE_BOARD EXITOSO ===\n")
+        print(f"✓ Invitación creada con ID: {invitation.id}")
+        print(f"{'='*70}\n")
         
         return {"ok": True, "message": f"Invitación enviada a {username}"}
     
-    except HTTPException as e:
-        print(f"HTTPException: {e.status_code} - {e.detail}")
+    except HTTPException:
         raise
     except Exception as e:
         db.rollback()
-        print(f"=== ERROR COMPARTIENDO ===")
-        print(f"Tipo de error: {type(e).__name__}")
-        print(f"Mensaje: {str(e)}")
+        print(f"\n✗ ERROR NO MANEJADO:")
+        print(f"  {type(e).__name__}: {str(e)}")
         import traceback
         traceback.print_exc()
-        print(f"=== FIN ERROR ===\n")
-        raise HTTPException(status_code=500, detail="Error al compartir")
-
-# ========== INVITACIONES ==========
+        print(f"{'='*70}\n")
+        raise HTTPException(status_code=500, detail=f"Error al compartir: {str(e)}")
 
 @app.get("/api/invitations")
 def get_invitations(x_user_id: int = Header(...), db: Session = Depends(get_db)):
     """Obtiene invitaciones pendientes del usuario"""
     try:
+        x_user_id = int(x_user_id)
+        
         db_user = db.query(DBUser).filter(DBUser.id == x_user_id).first()
         if not db_user:
             raise HTTPException(status_code=401, detail="Usuario no autenticado")
@@ -304,12 +276,8 @@ def get_invitations(x_user_id: int = Header(...), db: Session = Depends(get_db))
 def accept_invitation(invitation_id: int, x_user_id: int = Header(...), db: Session = Depends(get_db)):
     """Acepta una invitación de compartir tablero"""
     try:
-        # Convertir a enteros
-        try:
-            invitation_id = int(invitation_id)
-            x_user_id = int(x_user_id)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="ID inválido")
+        invitation_id = int(invitation_id)
+        x_user_id = int(x_user_id)
         
         invitation = db.query(DBInvitation).filter(
             DBInvitation.id == invitation_id,
@@ -322,7 +290,6 @@ def accept_invitation(invitation_id: int, x_user_id: int = Header(...), db: Sess
         if invitation.status != "pending":
             raise HTTPException(status_code=400, detail="La invitación ya fue procesada")
         
-        # Agregar usuario a shared_users
         invitation.board.shared_users.append(invitation.user)
         invitation.status = "accepted"
         db.commit()
@@ -333,19 +300,15 @@ def accept_invitation(invitation_id: int, x_user_id: int = Header(...), db: Sess
         raise
     except Exception as e:
         db.rollback()
-        print(f"Error aceptando invitación: {type(e).__name__}: {str(e)}")
+        print(f"Error aceptando invitación: {e}")
         raise HTTPException(status_code=500, detail="Error al aceptar invitación")
 
 @app.post("/api/invitations/{invitation_id}/reject")
 def reject_invitation(invitation_id: int, x_user_id: int = Header(...), db: Session = Depends(get_db)):
     """Rechaza una invitación de compartir tablero"""
     try:
-        # Convertir a enteros
-        try:
-            invitation_id = int(invitation_id)
-            x_user_id = int(x_user_id)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="ID inválido")
+        invitation_id = int(invitation_id)
+        x_user_id = int(x_user_id)
         
         invitation = db.query(DBInvitation).filter(
             DBInvitation.id == invitation_id,
@@ -367,13 +330,16 @@ def reject_invitation(invitation_id: int, x_user_id: int = Header(...), db: Sess
         raise
     except Exception as e:
         db.rollback()
-        print(f"Error rechazando invitación: {type(e).__name__}: {str(e)}")
+        print(f"Error rechazando invitación: {e}")
         raise HTTPException(status_code=500, detail="Error al rechazar invitación")
 
 @app.delete("/api/boards/{board_id}")
 def delete_board(board_id: int, x_user_id: int = Header(...), db: Session = Depends(get_db)):
     """Elimina un tablero"""
     try:
+        board_id = int(board_id)
+        x_user_id = int(x_user_id)
+        
         board = db.query(DBBoard).filter(
             DBBoard.id == board_id,
             DBBoard.owner_id == x_user_id
@@ -398,7 +364,27 @@ def user_exists(username: str, db: Session = Depends(get_db)):
     """Verifica si un usuario existe"""
     try:
         user = db.query(DBUser).filter(DBUser.username == username).first()
-        return {"exists": user is not None}
+        return {"exists": user is not None, "username": username}
     except Exception as e:
         print(f"Error verificando usuario: {e}")
         raise HTTPException(status_code=500, detail="Error")
+
+@app.get("/api/debug/boards")
+def debug_boards(x_user_id: int = Header(None), db: Session = Depends(get_db)):
+    """DEBUG: Ver tableros en BD"""
+    try:
+        if x_user_id:
+            x_user_id = int(x_user_id)
+        
+        all_boards = db.query(DBBoard).all()
+        user_boards = db.query(DBBoard).filter(DBBoard.owner_id == x_user_id).all() if x_user_id else []
+        
+        return {
+            "x_user_id": x_user_id,
+            "all_boards_count": len(all_boards),
+            "user_boards_count": len(user_boards),
+            "all_boards": [{"id": b.id, "title": b.title, "owner_id": b.owner_id} for b in all_boards],
+            "user_boards": [{"id": b.id, "title": b.title, "owner_id": b.owner_id} for b in user_boards]
+        }
+    except Exception as e:
+        return {"error": str(e)}
