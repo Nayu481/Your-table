@@ -181,64 +181,89 @@ def update_board(board_id: int, board: BoardCreate, x_user_id: int = Header(...)
 def share_board(board_id: int, username: str, x_user_id: int = Header(...), db: Session = Depends(get_db)):
     """Comparte un tablero con otro usuario (envía invitación)"""
     try:
+        print(f"\n=== SHARE_BOARD ===")
+        print(f"board_id recibido: {board_id} (tipo: {type(board_id).__name__})")
+        print(f"username recibido: {username} (tipo: {type(username).__name__})")
+        print(f"x_user_id recibido: {x_user_id} (tipo: {type(x_user_id).__name__})")
+        
         # Convertir board_id a entero por seguridad
         try:
             board_id = int(board_id)
-        except (ValueError, TypeError):
+            x_user_id = int(x_user_id)
+            print(f"Conversión exitosa: board_id={board_id}, x_user_id={x_user_id}")
+        except (ValueError, TypeError) as e:
+            print(f"Error en conversión: {e}")
             raise HTTPException(status_code=400, detail="ID de tablero inválido")
         
-        # Convertir x_user_id a entero
-        try:
-            x_user_id = int(x_user_id)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="ID de usuario inválido")
-        
+        print(f"Buscando tablero: id={board_id}, owner_id={x_user_id}")
         db_board = db.query(DBBoard).filter(
             DBBoard.id == board_id,
             DBBoard.owner_id == x_user_id
         ).first()
+        print(f"Tablero encontrado: {db_board is not None}")
         
         if not db_board:
+            print(f"Tablero no encontrado o sin permisos")
             raise HTTPException(status_code=404, detail="Tablero no encontrado o sin permisos")
         
+        print(f"Buscando usuario: {username}")
         target_user = db.query(DBUser).filter(DBUser.username == username).first()
+        print(f"Usuario encontrado: {target_user is not None}")
+        
         if not target_user:
+            print(f"Usuario {username} no encontrado en BD")
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
         
+        print(f"Verificando: target_user.id={target_user.id}, x_user_id={x_user_id}")
         if target_user.id == x_user_id:
+            print(f"Intento de compartir consigo mismo")
             raise HTTPException(status_code=400, detail="No puedes compartir contigo mismo")
         
         # Verificar si ya existe una invitación pendiente
+        print(f"Buscando invitaciones pendientes: board_id={board_id}, user_id={target_user.id}")
         existing_invite = db.query(DBInvitation).filter(
             DBInvitation.board_id == board_id,
             DBInvitation.user_id == target_user.id,
             DBInvitation.status == "pending"
         ).first()
+        print(f"Invitación pendiente existente: {existing_invite is not None}")
         
         if existing_invite:
+            print(f"Ya hay invitación pendiente")
             raise HTTPException(status_code=400, detail="Ya hay una invitación pendiente")
         
         # Verificar si ya está compartido
+        print(f"Verificando si ya está compartido...")
+        print(f"db_board.shared_users: {db_board.shared_users}")
+        print(f"target_user: {target_user}")
+        
         if target_user in db_board.shared_users:
+            print(f"Usuario ya tiene acceso")
             raise HTTPException(status_code=400, detail="Ya tiene acceso a este tablero")
         
         # Crear invitación
+        print(f"Creando invitación...")
         invitation = DBInvitation(board_id=board_id, user_id=target_user.id)
         db.add(invitation)
         db.commit()
         db.refresh(invitation)
         
-        print(f"Invitación creada: board={board_id}, user={target_user.id}, invitation={invitation.id}")
+        print(f"Invitación creada: id={invitation.id}, board={board_id}, user={target_user.id}")
+        print(f"=== SHARE_BOARD EXITOSO ===\n")
         
         return {"ok": True, "message": f"Invitación enviada a {username}"}
     
-    except HTTPException:
+    except HTTPException as e:
+        print(f"HTTPException: {e.status_code} - {e.detail}")
         raise
     except Exception as e:
         db.rollback()
-        print(f"Error compartiendo: {type(e).__name__}: {str(e)}")
+        print(f"=== ERROR COMPARTIENDO ===")
+        print(f"Tipo de error: {type(e).__name__}")
+        print(f"Mensaje: {str(e)}")
         import traceback
         traceback.print_exc()
+        print(f"=== FIN ERROR ===\n")
         raise HTTPException(status_code=500, detail="Error al compartir")
 
 # ========== INVITACIONES ==========
